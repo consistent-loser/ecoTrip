@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -162,7 +161,7 @@ export default function HomePage() {
       )}
 
       {!isLoading && !searchPerformed && (
-        <section className="py-16 space-y-16">
+        <section className="py-16">
             <div className="text-center mb-12">
                 <h2 className="text-3xl font-semibold mb-6 text-primary">Why Choose ecoTrip.com?</h2>
                 <p className="text-muted-foreground max-w-2xl mx-auto">
@@ -170,40 +169,44 @@ export default function HomePage() {
                 </p>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-                <div className="order-2 md:order-1">
-                    <Image src="https://picsum.photos/seed/rebook/600/400" alt="Eco Rebooking" width={600} height={400} className="mx-auto rounded-lg shadow-lg" data-ai-hint="savings money" />
-                </div>
-                <div className="order-1 md:order-2 text-center md:text-left">
-                    <RefreshCcw className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
-                    <h3 className="text-2xl font-semibold mb-3">Eco Rebooking: Save More, Effortlessly</h3>
-                    <p className="text-muted-foreground leading-relaxed mb-4">
-                        Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier.
-                    </p>
-                    <div className="mt-6 bg-primary/10 p-6 rounded-lg shadow-md">
-                        <div className="flex items-center justify-center md:justify-start text-primary mb-2">
-                            <PiggyBank className="h-10 w-10 mr-3" />
-                            <span className="text-3xl font-bold">
-                                {totalSavings !== null ? `$${totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Loading...'}
-                            </span>
-                        </div>
-                        <p className="text-center md:text-left text-sm text-muted-foreground font-medium">
-                            Total saved by our users so far!
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-16">
+                {/* Eco Rebooking Card */}
+                <div className="flex flex-col">
+                    <div className="mb-6">
+                        <Image src="https://picsum.photos/seed/rebook/600/400" alt="Eco Rebooking" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="savings money" />
+                    </div>
+                    <div className="text-center md:text-left">
+                        <RefreshCcw className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
+                        <h3 className="text-2xl font-semibold mb-3">Eco Rebooking: Save More, Effortlessly</h3>
+                        <p className="text-muted-foreground leading-relaxed mb-4">
+                            Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier.
                         </p>
+                        <div className="mt-6 bg-primary/10 p-6 rounded-lg shadow-md">
+                            <div className="flex items-center justify-center md:justify-start text-primary mb-2">
+                                <PiggyBank className="h-10 w-10 mr-3" />
+                                <span className="text-3xl font-bold">
+                                    {totalSavings !== null ? `$${totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Loading...'}
+                                </span>
+                            </div>
+                            <p className="text-center md:text-left text-sm text-muted-foreground font-medium">
+                                Total saved by our users so far!
+                            </p>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-                <div className="text-center md:text-left">
-                     <Leaf className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
-                    <h3 className="text-2xl font-semibold mb-3">Travel Green: Prioritizing Low-Emission Hotels</h3>
-                    <p className="text-muted-foreground leading-relaxed">
-                        We emphasize eco-friendly hotels that are actively working to reduce their carbon emissions and environmental impact. Make a positive choice for the planet by selecting accommodations that align with your sustainable values.
-                    </p>
-                </div>
-                <div>
-                    <Image src="https://picsum.photos/seed/ecohotel/600/400" alt="Eco-Friendly Hotel Focus" width={600} height={400} className="mx-auto rounded-lg shadow-lg" data-ai-hint="eco hotel" />
+                {/* Travel Green Card */}
+                <div className="flex flex-col">
+                    <div className="mb-6">
+                        <Image src="https://picsum.photos/seed/ecohotel/600/400" alt="Eco-Friendly Hotel Focus" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="eco hotel" />
+                    </div>
+                    <div className="text-center md:text-left">
+                        <Leaf className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
+                        <h3 className="text-2xl font-semibold mb-3">Travel Green: Prioritizing Low-Emission Hotels</h3>
+                        <p className="text-muted-foreground leading-relaxed">
+                            We emphasize eco-friendly hotels that are actively working to reduce their carbon emissions and environmental impact. Make a positive choice for the planet by selecting accommodations that align with your sustainable values.
+                        </p>
+                    </div>
                 </div>
             </div>
              <div className="text-center mt-16">
