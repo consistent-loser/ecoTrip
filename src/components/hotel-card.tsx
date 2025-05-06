@@ -70,8 +70,8 @@ export function HotelCard({ hotel, onBook }: HotelCardProps) {
               {hotel.amenities.slice(0, 4).map((amenity) => {
                 const IconComponent = amenityIcons[amenity] || Leaf; // Default to Leaf icon if specific one not found
                 return (
-                  <span key={amenity} className="flex items-center text-xs bg-accent/10 text-accent-foreground px-2 py-1 rounded-full">
-                    <IconComponent className="h-3.5 w-3.5 mr-1.5 text-accent" /> {amenity}
+                  <span key={amenity} className="flex items-center text-xs bg-accent text-accent-foreground px-2 py-1 rounded-full">
+                    <IconComponent className="h-3.5 w-3.5 mr-1.5 text-accent-foreground" /> {amenity}
                   </span>
                 );
               })}
@@ -96,3 +96,4 @@ export function HotelCard({ hotel, onBook }: HotelCardProps) {
     </Card>
   );
 }
+
