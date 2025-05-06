@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { HotelSearchCriteria } from '@/types';
@@ -57,104 +58,104 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end p-6 bg-secondary/50 rounded-lg shadow">
-        <FormField
-          control={form.control}
-          name="city"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> Destination</FormLabel>
-              <FormControl>
-                <Input placeholder="E.g., Greenville, Metro City" {...field} className="bg-background"/>
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+      <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-6 p-6 bg-secondary/50 rounded-lg shadow">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <FormField
+            control={form.control}
+            name="city"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> Destination</FormLabel>
+                <FormControl>
+                  <Input placeholder="E.g., Greenville, Metro City" {...field} className="bg-background"/>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-        <FormField
-          control={form.control}
-          name="checkInDate"
-          render={({ field }) => (
-            <FormItem className="flex flex-col">
-              <FormLabel>Check-in Date</FormLabel>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <FormControl>
-                    <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full pl-3 text-left font-normal bg-background",
-                        !field.value && "text-muted-foreground"
-                      )}
-                    >
-                      {field.value ? (
-                        format(field.value, "PPP")
-                      ) : (
-                        <span>Pick a date</span>
-                      )}
-                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                    </Button>
-                  </FormControl>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={field.value}
-                    onSelect={field.onChange}
-                    disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) } // Disable past dates
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+          <FormField
+            control={form.control}
+            name="checkInDate"
+            render={({ field }) => (
+              <FormItem className="flex flex-col">
+                <FormLabel>Check-in Date</FormLabel>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <FormControl>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full pl-3 text-left font-normal bg-background",
+                          !field.value && "text-muted-foreground"
+                        )}
+                      >
+                        {field.value ? (
+                          format(field.value, "PPP")
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </FormControl>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={field.value}
+                      onSelect={field.onChange}
+                      disabled={(date) => date < new Date(new Date().setHours(0,0,0,0)) } // Disable past dates
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-        <FormField
-          control={form.control}
-          name="checkOutDate"
-          render={({ field }) => (
-            <FormItem className="flex flex-col">
-              <FormLabel>Check-out Date</FormLabel>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <FormControl>
-                    <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full pl-3 text-left font-normal bg-background",
-                        !field.value && "text-muted-foreground"
-                      )}
-                    >
-                      {field.value ? (
-                        format(field.value, "PPP")
-                      ) : (
-                        <span>Pick a date</span>
-                      )}
-                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                    </Button>
-                  </FormControl>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={field.value}
-                    onSelect={field.onChange}
-                    disabled={(date) => 
-                      date < (form.getValues("checkInDate") || new Date(new Date().setHours(0,0,0,0)))
-                    }
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        
-        <div className="lg:grid lg:grid-cols-1 lg:gap-4 flex flex-col md:flex-row md:gap-4 md:col-span-2 lg:col-span-1">
+          <FormField
+            control={form.control}
+            name="checkOutDate"
+            render={({ field }) => (
+              <FormItem className="flex flex-col">
+                <FormLabel>Check-out Date</FormLabel>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <FormControl>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full pl-3 text-left font-normal bg-background",
+                          !field.value && "text-muted-foreground"
+                        )}
+                      >
+                        {field.value ? (
+                          format(field.value, "PPP")
+                        ) : (
+                          <span>Pick a date</span>
+                        )}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </FormControl>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={field.value}
+                      onSelect={field.onChange}
+                      disabled={(date) => 
+                        date < (form.getValues("checkInDate") || new Date(new Date().setHours(0,0,0,0)))
+                      }
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          
           <FormField
             control={form.control}
             name="numberOfGuests"
@@ -168,11 +169,12 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
               </FormItem>
             )}
           />
-          <Button type="submit" disabled={isLoading} className="w-full self-end h-10 mt-auto"> {/* Added mt-auto for better alignment with label */}
-            <Search className="mr-2 h-4 w-4" /> {isLoading ? 'Searching...' : 'Search Hotels'}
-          </Button>
         </div>
+        <Button type="submit" disabled={isLoading} className="w-full self-center h-12 text-lg">
+          <Search className="mr-2 h-5 w-5" /> {isLoading ? 'Searching...' : 'Search Hotels'}
+        </Button>
       </form>
     </Form>
   );
 }
+

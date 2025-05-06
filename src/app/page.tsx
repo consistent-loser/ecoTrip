@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -117,9 +118,9 @@ export default function HomePage() {
 
   return (
     <div className="container mx-auto py-8 px-4">
-      <section className="text-center mb-12 hero-section py-16 bg-gradient-to-r from-primary/80 via-primary to-accent/70 rounded-lg shadow-xl relative overflow-hidden">
+      <section className="text-center mb-12 hero-section py-20 bg-gradient-to-r from-primary/80 via-primary to-accent/70 rounded-lg shadow-xl relative overflow-hidden">
         <div className="absolute inset-0 opacity-20">
-            <Image src="https://picsum.photos/seed/travelbg/1200/400" alt="Travel Background" layout="fill" objectFit="cover" data-ai-hint="landscape travel"/>
+            <Image src="https://picsum.photos/seed/travelbg/1200/500" alt="Travel Background" layout="fill" objectFit="cover" data-ai-hint="landscape travel"/>
         </div>
         <div className="relative z-10">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-foreground mb-4">Find Your Perfect Eco-Stay</h1>
@@ -127,7 +128,7 @@ export default function HomePage() {
             Discover sustainable hotels and unique accommodations that care for our planet.
             </p>
         </div>
-        <div className="relative z-10 max-w-6xl mx-auto px-4">
+        <div className="relative z-10 max-w-4xl mx-auto px-4">
              <HotelSearchForm onSearch={handleSearch} isLoading={isLoading} />
         </div>
       </section>
