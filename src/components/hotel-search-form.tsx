@@ -57,7 +57,7 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end p-6 bg-secondary/50 rounded-lg shadow">
+      <form onSubmit={form.handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] gap-4 items-end p-6 bg-secondary/50 rounded-lg shadow">
         <FormField
           control={form.control}
           name="city"
@@ -154,12 +154,12 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
           )}
         />
         
-        <div className="grid grid-cols-2 gap-4">
+        <div className="lg:grid lg:grid-cols-1 lg:gap-4 flex flex-col md:flex-row md:gap-4 md:col-span-2 lg:col-span-1">
           <FormField
             control={form.control}
             name="numberOfGuests"
             render={({ field }) => (
-              <FormItem>
+              <FormItem className="w-full">
                 <FormLabel className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Guests</FormLabel>
                 <FormControl>
                   <Input type="number" placeholder="1" {...field} className="bg-background"/>
@@ -168,7 +168,7 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
               </FormItem>
             )}
           />
-          <Button type="submit" disabled={isLoading} className="w-full self-end h-10">
+          <Button type="submit" disabled={isLoading} className="w-full self-end h-10 mt-auto"> {/* Added mt-auto for better alignment with label */}
             <Search className="mr-2 h-4 w-4" /> {isLoading ? 'Searching...' : 'Search Hotels'}
           </Button>
         </div>
