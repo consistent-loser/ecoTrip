@@ -1,8 +1,9 @@
+
 import Image from 'next/image';
 import type { Hotel } from '@/types';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { MapPin, Star, Wifi, Utensils, ParkingCircle, Dumbbell } from 'lucide-react'; // Example amenities icons
+import { MapPin, Star, Wifi, Utensils, ParkingCircle, Dumbbell, Leaf, Waves } from 'lucide-react'; // Example amenities icons
 
 interface HotelCardProps {
   hotel: Hotel;
@@ -12,16 +13,29 @@ interface HotelCardProps {
 const amenityIcons: { [key: string]: React.ElementType } = {
   'Free WiFi': Wifi,
   'Restaurant': Utensils,
-  'Pool': () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.33 18.33a4 4 0 0 0-5.66 0"/><path d="M12 12a4 4 0 0 0 0 5.66"/><path d="M12 12a4 4 0 0 0 0-5.66"/><path d="m5.67 5.67_a4 4 0 0 0 0 5.66"/><path d="M22 2l-2.5 2.5"/><path d="M2 22l2.5-2.5"/><path d="M20 22l-2.5-2.5"/><path d="M2 2l2.5 2.5"/><path d="M12 6V2"/><path d="M12 22v-4"/><path d="M6 12H2"/><path d="M22 12h-4"/></svg>, // Custom Pool icon
+  'Pool': Waves, 
   'Gym': Dumbbell,
   'Parking': ParkingCircle,
-  'Eco-friendly': () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 17.607c-2.398 0-4.366-1.63-4.973-3.84.003-.007.005-.014.005-.021 0-.096.018-.19.05-.281A5.008 5.008 0 0 1 12 8c2.76 0 5 2.24 5 5a4.987 4.987 0 0 1-1.027 3.086c.032.09.05.185.05.281 0 .007.002.014.005.021-.607 2.21-2.575 3.84-4.973 3.84zM9 12s1.5-2 3-2 3 2 3 2"/></svg> // Custom Eco icon
+  'Eco-friendly': Leaf,
+  'Spa': () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M8 14s1.5-2 4-2 4 2 4 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/><path d="M12 6V2"/></svg>, // Custom Spa icon
+  'Pet-friendly': () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 5.5a1 1 0 0 0-1.82-.02L2.5 17.5"/><path d="M19.5 13.5a1 1 0 0 0-1.82.02L7.5 22.5"/><path d="M12 7L21 11"/><path d="M3 11l9-4"/></svg>, // Custom Pet-friendly icon
+  'Airport Shuttle': () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/><path d="m14 18-3-3 3-3"/><path d="M10 15h10v4H10zM17 4h4v4h-4z"/></svg>, // Custom Airport Shuttle icon
+  'Ocean View': Waves,
+  'Mountain View': MountainIcon,
 };
+
+function MountainIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m8 3 4 8 5-5 5 15H2L8 3z" />
+    </svg>
+  )
+}
 
 
 export function HotelCard({ hotel, onBook }: HotelCardProps) {
   return (
-    <Card className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col h-full">
+    <Card className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col h-full bg-card">
       <div className="relative w-full h-48 sm:h-56">
         <Image
           src={hotel.imageUrl}
@@ -29,10 +43,11 @@ export function HotelCard({ hotel, onBook }: HotelCardProps) {
           layout="fill"
           objectFit="cover"
           data-ai-hint="hotel room"
+          className="transition-transform duration-300 group-hover:scale-105"
         />
       </div>
       <CardHeader className="pb-2">
-        <CardTitle className="text-xl font-semibold">{hotel.name}</CardTitle>
+        <CardTitle className="text-xl font-semibold text-card-foreground">{hotel.name}</CardTitle>
         <CardDescription className="flex items-center text-sm text-muted-foreground pt-1">
           <MapPin className="h-4 w-4 mr-1 text-primary" />
           {hotel.address}, {hotel.city}
@@ -50,21 +65,26 @@ export function HotelCard({ hotel, onBook }: HotelCardProps) {
         </div>
         {hotel.amenities && hotel.amenities.length > 0 && (
           <div>
-            <h4 className="text-xs font-medium text-muted-foreground mb-1">Amenities:</h4>
+            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Key Amenities:</h4>
             <div className="flex flex-wrap gap-2">
               {hotel.amenities.slice(0, 4).map((amenity) => {
-                const IconComponent = amenityIcons[amenity] || (() => <span className="text-xs">•</span>);
+                const IconComponent = amenityIcons[amenity] || Leaf; // Default to Leaf icon if specific one not found
                 return (
-                  <span key={amenity} className="flex items-center text-xs bg-accent/10 text-accent-foreground_dark px-2 py-1 rounded-full">
-                    <IconComponent className="h-3 w-3 mr-1 text-accent" /> {amenity}
+                  <span key={amenity} className="flex items-center text-xs bg-accent/10 text-accent-foreground px-2 py-1 rounded-full">
+                    <IconComponent className="h-3.5 w-3.5 mr-1.5 text-accent" /> {amenity}
                   </span>
                 );
               })}
+               {hotel.amenities.length > 4 && (
+                <span className="text-xs text-muted-foreground self-center ml-1">
+                  +{hotel.amenities.length - 4} more
+                </span>
+              )}
             </div>
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-between items-center pt-0 pb-4 px-6 border-t mt-auto">
+      <CardFooter className="flex justify-between items-center pt-4 pb-4 px-6 border-t mt-auto bg-secondary/30">
         <p className="text-lg font-bold text-primary">
           ${hotel.pricePerNight}
           <span className="text-xs text-muted-foreground font-normal"> / night</span>

@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { PaymentDetails } from '@/types';
@@ -15,10 +16,8 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { CreditCard, Lock } from 'lucide-react';
-// Placeholder for PayPal and Debit Card icons if available or use generic
-// For now, using CreditCard for all as placeholder or text
-// import { Paypal } from 'lucide-react'; // Assuming Paypal icon exists or similar
+import { CreditCard, Lock, Wallet } from 'lucide-react';
+
 
 const paymentSchema = z.object({
   method: z.enum(['creditCard', 'paypal', 'debitCard'], {
@@ -91,32 +90,35 @@ export function PaymentForm({ onSubmit, isProcessing = false, totalAmount }: Pay
           name="method"
           render={({ field }) => (
             <FormItem className="space-y-3">
-              <FormLabel>Payment Method</FormLabel>
+              <FormLabel className="text-base font-medium">Payment Method</FormLabel>
               <FormControl>
                 <RadioGroup
                   onValueChange={field.onChange}
                   defaultValue={field.value}
-                  className="flex flex-col space-y-1"
+                  className="flex flex-col space-y-2 pt-1"
                 >
-                  <FormItem className="flex items-center space-x-3 space-y-0">
+                  <FormItem className="flex items-center space-x-3 space-y-0 p-3 border rounded-md hover:border-primary has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 transition-all">
                     <FormControl>
-                      <RadioGroupItem value="creditCard" />
+                      <RadioGroupItem value="creditCard" id="creditCard"/>
                     </FormControl>
-                    <FormLabel className="font-normal flex items-center"><CreditCard className="mr-2 h-5 w-5 text-accent" /> Credit Card</FormLabel>
+                    <FormLabel htmlFor="creditCard" className="font-normal flex items-center cursor-pointer w-full">
+                        <CreditCard className="mr-3 h-5 w-5 text-accent" /> Credit Card
+                    </FormLabel>
                   </FormItem>
-                  <FormItem className="flex items-center space-x-3 space-y-0">
+                  <FormItem className="flex items-center space-x-3 space-y-0 p-3 border rounded-md hover:border-primary has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 transition-all">
                     <FormControl>
-                      <RadioGroupItem value="debitCard" />
+                      <RadioGroupItem value="debitCard" id="debitCard"/>
                     </FormControl>
-                    <FormLabel className="font-normal flex items-center"><CreditCard className="mr-2 h-5 w-5 text-accent" /> Debit Card</FormLabel>
+                    <FormLabel htmlFor="debitCard" className="font-normal flex items-center cursor-pointer w-full">
+                        <CreditCard className="mr-3 h-5 w-5 text-accent" /> Debit Card
+                    </FormLabel>
                   </FormItem>
-                  <FormItem className="flex items-center space-x-3 space-y-0">
+                  <FormItem className="flex items-center space-x-3 space-y-0 p-3 border rounded-md hover:border-primary has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5 transition-all">
                     <FormControl>
-                      <RadioGroupItem value="paypal" />
+                      <RadioGroupItem value="paypal" id="paypal"/>
                     </FormControl>
-                    {/* Replace with actual PayPal icon if available */}
-                    <FormLabel className="font-normal flex items-center">
-                       <svg className="mr-2 h-5 w-5 text-accent" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M11.3564 2.83496C9.40818 2.83496 7.73914 4.16549 7.22802 5.99676C7.22498 6.00922 7.22107 6.02183 7.21803 6.0337C5.00158 6.30361 3.35043 8.10476 3.35043 10.3943C3.35043 12.7614 5.15845 14.6351 7.45509 14.6351H8.00001V10.122H11.1811C13.8937 10.122 15.6194 8.65174 16.0119 6.39467C16.0341 6.2717 16.0438 6.15428 16.0438 6.04064C16.0438 4.24434 14.0495 2.83496 11.3564 2.83496ZM11.1941 12.9344H8.00001V15.3896H8.91854C9.28162 15.3896 9.57803 15.7467 9.57803 16.1136V17.6254H7.76908C7.72425 18.4002 7.7202 19.1287 7.76908 19.8183H9.57803V20.8809C9.57803 21.276 9.89628 21.5998 10.2914 21.5998H12.5839C14.8404 21.5998 16.5434 20.0059 16.8868 17.808C16.9153 17.6376 16.9296 17.4724 16.9296 17.3115C16.9296 14.9041 14.4044 12.9344 11.1941 12.9344ZM17.3079 10.3902C17.3079 10.4244 17.3079 10.4585 17.3079 10.4927V14.6351H17.8147C20.0263 14.6351 21.6595 12.8362 21.6595 10.5638C21.6595 8.39105 20.1912 6.60662 18.0751 6.24109C18.0552 6.23687 18.0346 6.23137 18.0145 6.22694C18.3911 6.03242 18.6355 5.63653 18.6355 5.19135C18.6355 4.48132 18.0751 3.90503 17.3506 3.90503C16.6538 3.90503 16.1013 4.45691 16.0697 5.13178L16.0611 5.13178C16.0611 5.13178 16.0611 5.13178 16.0611 5.13178C15.8886 5.13178 15.7438 5.20164 15.7214 5.35223C15.7214 5.35223 15.7214 5.35223 15.7214 5.35223C15.6787 5.65772 15.7782 5.95898 16.0027 6.13745L16.0027 6.13745L16.0027 6.13745C16.0027 6.13745 16.0027 6.13745 16.0027 6.13745L17.3079 10.3902Z" /></svg>
+                    <FormLabel htmlFor="paypal" className="font-normal flex items-center cursor-pointer w-full">
+                       <Wallet className="mr-3 h-5 w-5 text-accent" />
                       PayPal
                     </FormLabel>
                   </FormItem>
@@ -128,7 +130,7 @@ export function PaymentForm({ onSubmit, isProcessing = false, totalAmount }: Pay
         />
 
         {(paymentMethod === 'creditCard' || paymentMethod === 'debitCard') && (
-          <>
+          <div className="space-y-4 p-4 border rounded-md bg-secondary/30">
             <FormField
               control={form.control}
               name="cardNumber"
@@ -136,7 +138,7 @@ export function PaymentForm({ onSubmit, isProcessing = false, totalAmount }: Pay
                 <FormItem>
                   <FormLabel>Card Number</FormLabel>
                   <FormControl>
-                    <Input placeholder="0000 0000 0000 0000" {...field} />
+                    <Input placeholder="0000 0000 0000 0000" {...field} className="bg-background"/>
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -150,7 +152,7 @@ export function PaymentForm({ onSubmit, isProcessing = false, totalAmount }: Pay
                   <FormItem>
                     <FormLabel>Expiry Date</FormLabel>
                     <FormControl>
-                      <Input placeholder="MM/YY" {...field} />
+                      <Input placeholder="MM/YY" {...field} className="bg-background"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -163,41 +165,43 @@ export function PaymentForm({ onSubmit, isProcessing = false, totalAmount }: Pay
                   <FormItem>
                     <FormLabel>CVC</FormLabel>
                     <FormControl>
-                      <Input placeholder="123" {...field} />
+                      <Input placeholder="123" {...field} className="bg-background"/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
-          </>
+          </div>
         )}
 
         {paymentMethod === 'paypal' && (
-          <FormField
-            control={form.control}
-            name="paypalEmail"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>PayPal Email</FormLabel>
-                <FormControl>
-                  <Input placeholder="you@example.com" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          <div className="space-y-4 p-4 border rounded-md bg-secondary/30">
+            <FormField
+              control={form.control}
+              name="paypalEmail"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>PayPal Email</FormLabel>
+                  <FormControl>
+                    <Input type="email" placeholder="you@example.com" {...field} className="bg-background"/>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
         )}
         
-        <div className="text-right font-semibold text-lg">
-          Total: ${totalAmount.toFixed(2)}
+        <div className="text-right font-semibold text-lg text-foreground">
+          Total Amount: <span className="text-primary">${totalAmount.toFixed(2)}</span>
         </div>
 
-        <Button type="submit" disabled={isProcessing} className="w-full">
-          <Lock className="mr-2 h-4 w-4" /> {isProcessing ? 'Processing...' : `Pay $${totalAmount.toFixed(2)}`}
+        <Button type="submit" disabled={isProcessing} className="w-full text-lg py-6">
+          <Lock className="mr-2 h-5 w-5" /> {isProcessing ? 'Processing...' : `Pay $${totalAmount.toFixed(2)}`}
         </Button>
         <p className="text-xs text-muted-foreground text-center">
-          This is a simulated payment. No real transaction will occur.
+          This is a simulated payment. No real transaction will occur. Your data is safe.
         </p>
       </form>
     </Form>
