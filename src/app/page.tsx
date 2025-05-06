@@ -18,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf } from 'lucide-react';
+import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
@@ -31,8 +31,15 @@ export default function HomePage() {
   const [showBookingSuccessDialog, setShowBookingSuccessDialog] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [lastSearchCriteria, setLastSearchCriteria] = useState<HotelSearchCriteria | null>(null);
+  const [totalSavings, setTotalSavings] = useState<number>(0);
 
   const { toast } = useToast();
+
+  useEffect(() => {
+    // Simulate fetching or calculating total savings
+    // This runs client-side after hydration
+    setTotalSavings(1234.56); // Mock value
+  }, []);
 
   const handleSearch = async (criteria: HotelSearchCriteria) => {
     setIsLoading(true);
@@ -170,9 +177,20 @@ export default function HomePage() {
                 <div className="order-1 md:order-2 text-center md:text-left">
                     <RefreshCcw className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
                     <h3 className="text-2xl font-semibold mb-3">Eco Rebooking: Save More, Effortlessly</h3>
-                    <p className="text-muted-foreground leading-relaxed">
+                    <p className="text-muted-foreground leading-relaxed mb-4">
                         Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier.
                     </p>
+                    <div className="mt-6 bg-primary/10 p-6 rounded-lg shadow-md">
+                        <div className="flex items-center justify-center md:justify-start text-primary mb-2">
+                            <PiggyBank className="h-10 w-10 mr-3" />
+                            <span className="text-3xl font-bold">
+                                {totalSavings !== null ? `$${totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Loading...'}
+                            </span>
+                        </div>
+                        <p className="text-center md:text-left text-sm text-muted-foreground font-medium">
+                            Total saved by our users so far!
+                        </p>
+                    </div>
                 </div>
             </div>
 
