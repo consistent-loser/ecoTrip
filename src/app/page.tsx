@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -128,7 +127,7 @@ export default function HomePage() {
             Discover sustainable hotels and unique accommodations that care for our planet.
             </p>
         </div>
-        <div className="relative z-10 max-w-4xl mx-auto px-4">
+        <div className="relative z-10 max-w-6xl mx-auto px-4">
              <HotelSearchForm onSearch={handleSearch} isLoading={isLoading} />
         </div>
       </section>
