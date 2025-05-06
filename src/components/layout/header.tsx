@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { Plane, UserCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-// Define the OwlWithCashIcon SVG component directly in this file
-function OwlWithCashIcon(props: React.SVGProps<SVGSVGElement>) {
+// Define the AirplaneWithDollarIcon SVG component directly in this file
+function AirplaneWithDollarIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
       {...props}
@@ -12,32 +12,26 @@ function OwlWithCashIcon(props: React.SVGProps<SVGSVGElement>) {
       height="24"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="currentColor"
+      stroke="currentColor" // This is for the plane outline
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {/* Simplified Owl Body */}
-      <path d="M15 14c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-3.52 2.55-6.43 5.88-6.92" />
-      <path d="M15 14c0-3.87 3.13-7 7-7s7 3.13 7 7c0 3.52-2.55 6.43-5.88 6.92" />
-      {/* Owl Head */}
-      <path d="M12 12a3 3 0 0 0 3-3c0-1.41-.93-2.58-2.18-2.89" />
-      <path d="M12 12a3 3 0 0 1-3-3c0-1.41.93-2.58 2.18-2.89" />
-      <path d="M12 2a1 1 0 0 1 1 1v1a1 1 0 0 1-2 0V3a1 1 0 0 1 1-1z" /> {/* Tuft */}
-      {/* Eyes */}
-      <circle cx="10" cy="9" r="1.5" fill="currentColor"/>
-      <circle cx="14" cy="9" r="1.5" fill="currentColor"/>
-      {/* Beak */}
-      <path d="m12 10 1 1-1 1-1-1z" />
-      
-      {/* Cash Symbol (simplified) - Dollar signs in hands/wings */}
-      {/* Left Hand/Wing with $ */}
-      <path d="M8 17c-1 0-1.5-.5-1.5-1.5S7 14 8 14" />
-      <text x="6" y="15.5" fontSize="3" fontWeight="bold" fill="currentColor" >$</text>
-      
-      {/* Right Hand/Wing with $ */}
-      <path d="M16 17c1 0 1.5-.5 1.5-1.5S17 14 16 14" />
-      <text x="17" y="15.5" fontSize="3" fontWeight="bold" fill="currentColor" >$</text>
+      {/* Plane shape (from Lucide Plane icon) */}
+      <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>
+      {/* Dollar Sign */}
+      <text 
+        x="12"
+        y="12.5" 
+        fontSize="6.5" 
+        fontWeight="bold" 
+        fill="currentColor" // Dollar sign filled with current text color (primary)
+        stroke="none" // No stroke for the text itself, rely on fill
+        textAnchor="middle" 
+        dominantBaseline="middle"
+      >
+        $
+      </text>
     </svg>
   );
 }
@@ -48,7 +42,7 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-14 max-w-screen-2xl items-center">
         <Link href="/" className="mr-6 flex items-center space-x-2">
-          <OwlWithCashIcon className="h-7 w-7 text-primary" />
+          <AirplaneWithDollarIcon className="h-7 w-7 text-primary" />
           <span className="font-bold sm:inline-block text-lg">
             ecoTrip.com
           </span>
