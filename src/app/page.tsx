@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -17,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, PartyPopper, SearchX } from 'lucide-react';
+import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
@@ -154,12 +155,44 @@ export default function HomePage() {
       )}
 
       {!isLoading && !searchPerformed && (
-        <section className="text-center py-16">
-            <Image src="https://picsum.photos/seed/explore/600/400" alt="Explore destinations" width={600} height={400} className="mx-auto rounded-lg shadow-md mb-8" data-ai-hint="nature landscape" />
-            <h2 className="text-3xl font-semibold mb-4">Start Your Sustainable Journey</h2>
-            <p className="text-muted-foreground max-w-xl mx-auto">
-                Use the search bar above to find eco-friendly accommodations for your next adventure. Let's make travel better for the planet, one trip at a time.
-            </p>
+        <section className="py-16 space-y-16">
+            <div className="text-center mb-12">
+                <h2 className="text-3xl font-semibold mb-6 text-primary">Why Choose ecoTrip.com?</h2>
+                <p className="text-muted-foreground max-w-2xl mx-auto">
+                    We're committed to making your travel both sustainable and rewarding. Explore the unique benefits of booking with us.
+                </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+                <div className="order-2 md:order-1">
+                    <Image src="https://picsum.photos/seed/rebook/600/400" alt="Eco Rebooking" width={600} height={400} className="mx-auto rounded-lg shadow-lg" data-ai-hint="savings money" />
+                </div>
+                <div className="order-1 md:order-2 text-center md:text-left">
+                    <RefreshCcw className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
+                    <h3 className="text-2xl font-semibold mb-3">Eco Rebooking: Save More, Effortlessly</h3>
+                    <p className="text-muted-foreground leading-relaxed">
+                        Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier.
+                    </p>
+                </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+                <div className="text-center md:text-left">
+                     <Leaf className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
+                    <h3 className="text-2xl font-semibold mb-3">Travel Green: Prioritizing Low-Emission Hotels</h3>
+                    <p className="text-muted-foreground leading-relaxed">
+                        We emphasize eco-friendly hotels that are actively working to reduce their carbon emissions and environmental impact. Make a positive choice for the planet by selecting accommodations that align with your sustainable values.
+                    </p>
+                </div>
+                <div>
+                    <Image src="https://picsum.photos/seed/ecohotel/600/400" alt="Eco-Friendly Hotel Focus" width={600} height={400} className="mx-auto rounded-lg shadow-lg" data-ai-hint="eco hotel" />
+                </div>
+            </div>
+             <div className="text-center mt-16">
+                <p className="text-lg text-muted-foreground">
+                    Ready to explore? Use the search bar above to find your next sustainable adventure.
+                </p>
+            </div>
         </section>
       )}
 
@@ -207,3 +240,4 @@ export default function HomePage() {
     </div>
   );
 }
+
