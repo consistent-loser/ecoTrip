@@ -1,11 +1,11 @@
-
+'use server';
 
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
 
 // --- Amadeus API Configuration ---
-// Environment variables are loaded automatically by Next.js from .env.local
-const AMADEUS_API_KEY = process.env.NEXT_PUBLIC_AMADEUS_API_KEY;
-const AMADEUS_API_SECRET = process.env.NEXT_PUBLIC_AMADEUS_API_SECRET;
+// Read directly from server-side environment variables
+const AMADEUS_API_KEY = process.env.AMADEUS_API_KEY;
+const AMADEUS_API_SECRET = process.env.AMADEUS_API_SECRET;
 const AMADEUS_API_BASE_URL = 'https://test.api.amadeus.com'; // Use https://api.amadeus.com for production
 
 // --- Amadeus Authentication ---
@@ -14,6 +14,7 @@ let tokenExpiryTime: number | null = null;
 
 /**
  * Fetches or retrieves a cached Amadeus API access token.
+ * Server-side only.
  * @returns A promise that resolves to the access token string.
  * @throws Error if authentication fails or API keys are missing/invalid.
  */
@@ -21,51 +22,49 @@ async function getAmadeusAccessToken(): Promise<string> {
   const now = Date.now();
 
   if (accessToken && tokenExpiryTime && now < tokenExpiryTime) {
-    // console.log("Using cached Amadeus token");
+    // console.log("Using cached Amadeus token (Server)");
     return accessToken.access_token;
   }
 
   // Explicitly check if keys are missing *before* making the API call
   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-      const message = "Amadeus API Key/Secret not configured. Cannot authenticate. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.";
-      console.error(message);
-      throw new Error(message); // Throw error early
+      const message = "Amadeus API Key/Secret not configured server-side. Cannot authenticate. Please ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are set in the server environment.";
+      console.error(`AUTH_CONFIG_ERROR: ${message}`);
+      throw new Error("API credentials missing. Search cannot be performed."); // More specific error for internal issue
   }
-  // Optional: Check for known placeholder values if you want to be extra cautious
-  // (Though the check above should generally cover missing real keys)
-  // if (AMADEUS_API_KEY === 'YOUR_PLACEHOLDER_KEY' || AMADEUS_API_SECRET === 'YOUR_PLACEHOLDER_SECRET') { ... }
 
-
-  console.log("Fetching new Amadeus token...");
+  console.log("Fetching new Amadeus token (Server)...");
   try {
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v1/security/oauth2/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      // Use the keys fetched from environment variables
+      // Use the keys fetched from server environment variables
       body: `grant_type=client_credentials&client_id=${AMADEUS_API_KEY}&client_secret=${AMADEUS_API_SECRET}`,
+      // Important for server-side fetches if caching interferes
+      cache: 'no-store',
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Amadeus Auth Error Response Body:", errorBody); // Log the raw error body
+      console.error("Amadeus Auth Error Response Body (Server):", errorBody); // Log the raw error body
 
       let errorMessage = `Amadeus auth failed: ${response.status} ${response.statusText}`;
        // Try to parse for more specific feedback, especially "invalid_client"
       try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.error === 'invalid_client') {
-            errorMessage = `Amadeus auth failed: Invalid API Key or Secret. Please verify your credentials in environment variables. (Code: ${errorJson.code || 'N/A'})`;
-            console.error(">>> Specific Error: Invalid Amadeus Client Credentials <<<");
+            errorMessage = `Amadeus auth failed: Invalid API Key or Secret. Please verify your server-side credentials. (Code: ${errorJson.code || 'N/A'})`;
+            console.error(">>> Specific Error: Invalid Amadeus Client Credentials (Server) <<<");
          } else if (errorJson.title) {
              errorMessage = `Amadeus auth failed: ${errorJson.title} (Code: ${errorJson.code || 'N/A'})`;
          }
       } catch (parseError) {
         // Ignore parsing error, use the generic message
-        console.warn("Could not parse Amadeus auth error response JSON.");
+        console.warn("Could not parse Amadeus auth error response JSON (Server).");
       }
-
+       console.error(`AMADEUS_AUTH_FAILED (Server): ${errorMessage}`);
       throw new Error(errorMessage); // Throw the detailed error message
     }
 
@@ -73,14 +72,15 @@ async function getAmadeusAccessToken(): Promise<string> {
     accessToken = tokenData;
     // Set expiry time slightly earlier than actual expiry to be safe (e.g., 5 minutes buffer)
     tokenExpiryTime = now + (tokenData.expires_in - 300) * 1000;
-    console.log("New Amadeus token obtained.");
+    console.log("New Amadeus token obtained (Server).");
     return accessToken.access_token;
-  } catch (error) {
-    console.error("Error fetching Amadeus access token:", error);
+  } catch (error: any) {
+    console.error("Error fetching Amadeus access token (Server):", error);
     accessToken = null; // Invalidate token on error
     tokenExpiryTime = null;
     // Re-throw the caught error (could be network error or the specific auth error)
-    throw error;
+    // Append context that it happened server-side
+    throw new Error(`Failed to get Amadeus token (Server): ${error.message}`);
   }
 }
 
@@ -89,34 +89,37 @@ async function getAmadeusAccessToken(): Promise<string> {
 
 /**
  * Gets the IATA city code for a given city name using Amadeus API.
+ * Server-side only.
  * @param cityName The name of the city.
  * @param token The Amadeus access token.
  * @returns A promise resolving to the city code string or null if not found.
  */
 async function getCityCode(cityName: string, token: string): Promise<string | null> {
   try {
+    console.log(`Fetching city code for: ${cityName} (Server)`);
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v1/reference-data/locations?subType=CITY&keyword=${encodeURIComponent(cityName)}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
       },
+       cache: 'no-store', // Avoid caching issues for dynamic data
     });
 
     if (!response.ok) {
        const errorBody = await response.text();
-       console.error("Amadeus City Lookup Error Response:", errorBody);
+       console.error(`Amadeus City Lookup Error Response (Server, Status ${response.status}):`, errorBody);
        // Try to parse the error for more specific feedback
        try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.errors && errorJson.errors.length > 0) {
            const firstError = errorJson.errors[0];
-           console.error(`Amadeus City Lookup API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
+           console.error(`Parsed Amadeus City Lookup API Error (Server, ${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
            // Don't throw here, just log and return null
          }
        } catch (parseError) {
-         // Ignore parsing error
+          console.warn("Could not parse Amadeus city lookup error response JSON (Server).");
        }
-      console.error(`Amadeus city lookup failed: ${response.status} ${response.statusText}`);
+      console.error(`AMADEUS_CITY_LOOKUP_FAILED (Server): ${response.status} ${response.statusText} for city "${cityName}"`);
       return null; // Indicate failure to find code
     }
 
@@ -126,14 +129,14 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
       // Prioritize exact matches or cities over airports if possible
       const city = data.data.find((loc: any) => loc.name.toLowerCase() === cityName.toLowerCase() && loc.subType === 'CITY');
       const code = city ? city.iataCode : data.data[0].iataCode; // Fallback to first result if no exact city match
-      console.log(`Found city code for ${cityName}: ${code}`);
+      console.log(`Found city code for ${cityName}: ${code} (Server)`);
       return code;
     } else {
-      console.warn(`No city code found for: ${cityName}`);
+      console.warn(`No city code found for: ${cityName} (Server)`);
       return null;
     }
-  } catch (error) {
-    console.error(`Error fetching city code for ${cityName}:`, error);
+  } catch (error: any) {
+    console.error(`Error fetching city code for ${cityName} (Server):`, error);
     return null;
   }
 }
@@ -141,6 +144,7 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
 
 /**
  * Transforms an Amadeus hotel offer into our application's Hotel type.
+ * Can run on server or client, but typically called server-side after fetch.
  * @param offer The hotel offer object from Amadeus API.
  * @returns A Hotel object.
  */
@@ -186,37 +190,37 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 // --- API Functions ---
 
 /**
- * Searches for hotels using the Amadeus API.
+ * Searches for hotels using the Amadeus API. Runs Server-Side.
  * @param criteria The search criteria.
  * @returns A promise that resolves to an array of Hotel objects.
  * @throws Error if search fails due to configuration, authentication, or API errors.
  */
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
-  console.log("Searching Amadeus hotels with criteria:", criteria);
+  console.log("Searching Amadeus hotels with criteria (Server):", criteria);
 
   const { city, checkInDate, checkOutDate, numberOfGuests } = criteria;
 
   // Validate required criteria *before* attempting API calls
   if (!city) {
-    console.warn("No city provided for Amadeus search.");
+    console.warn("SERVER_VALIDATION: No city provided for Amadeus search.");
     throw new Error("Please provide a destination city for the search.");
   }
   if (!checkInDate || !checkOutDate) {
-      console.warn("Check-in and Check-out dates are required for Amadeus search.");
+      console.warn("SERVER_VALIDATION: Check-in and Check-out dates are required for Amadeus search.");
       throw new Error("Please provide both check-in and check-out dates for the search.");
   }
    if (checkOutDate <= checkInDate) {
-      console.warn("Check-out date must be after check-in date.");
+      console.warn("SERVER_VALIDATION: Check-out date must be after check-in date.");
       throw new Error("Check-out date must be after check-in date.");
   }
    if (numberOfGuests < 1) {
-      console.warn("Number of guests must be at least 1.");
+      console.warn("SERVER_VALIDATION: Number of guests must be at least 1.");
       throw new Error("Please specify at least one guest.");
   }
 
-  // Check if API keys are actually missing or empty *before* attempting to get token
+  // Check if API keys are missing - This is redundant if getAmadeusAccessToken checks, but provides early exit
    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-       console.error("CRITICAL: Amadeus API Key/Secret are missing. Cannot proceed with search. Set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET.");
+       console.error("CRITICAL (Server): Amadeus API Key/Secret are missing. Cannot proceed with search. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are set in server environment.");
        // Throw a specific configuration error
        throw new Error("API credentials missing. Search cannot be performed.");
    }
@@ -235,7 +239,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     // Get City Code
     cityCode = await getCityCode(city, token);
     if (!cityCode) {
-      console.warn(`Could not find IATA city code for ${city}. Cannot search Amadeus.`);
+      console.warn(`Could not find IATA city code for ${city}. Cannot search Amadeus. (Server)`);
       throw new Error(`Could not find location code for "${city}". Please try a different city name or spelling.`);
     }
 
@@ -254,7 +258,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     });
 
     const fullSearchUrl = `${searchUrl}?${params.toString()}`;
-    console.log(`Attempting Amadeus Search: GET ${fullSearchUrl}`);
+    console.log(`Attempting Amadeus Search (Server): GET ${fullSearchUrl}`);
 
     // Perform Hotel Search
     response = await fetch(fullSearchUrl, {
@@ -262,18 +266,19 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       headers: {
         'Authorization': `Bearer ${token}`,
       },
+      cache: 'no-store', // Ensure fresh data for search results
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`Amadeus Hotel Search Error Response Body (Status ${response.status}):`, errorBody);
+      console.error(`Amadeus Hotel Search Error Response Body (Server, Status ${response.status}):`, errorBody);
        // Try to parse the error for more specific feedback
        let apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}`;
        try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.errors && errorJson.errors.length > 0) {
            const firstError = errorJson.errors[0];
-           console.error(`Parsed Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
+           console.error(`Parsed Amadeus API Error (Server, ${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
            // Customize message based on common error codes if desired
            if (firstError.code === 38196) { // Example: Invalid date format or range
                 apiErrorMessage = `Search failed: ${firstError.title}. Please check your dates.`;
@@ -284,8 +289,9 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
            }
          }
        } catch (parseError) {
-          console.warn("Could not parse Amadeus search error response JSON.");
+          console.warn("Could not parse Amadeus search error response JSON (Server).");
        }
+       console.error(`AMADEUS_SEARCH_FAILED (Server): ${apiErrorMessage}`);
       throw new Error(apiErrorMessage); // Throw the specific API error
     }
 
@@ -293,56 +299,67 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     const data = await response.json();
 
     if (data && data.data && Array.isArray(data.data)) {
-       console.log(`Found ${data.data.length} hotel offers from Amadeus.`);
+       console.log(`Found ${data.data.length} hotel offers from Amadeus (Server).`);
        // Filter out offers that might be missing essential info like price or hotel details
        const validOffers = data.data.filter((offer: AmadeusHotelOffer) => offer.hotel && offer.offers?.[0]?.price?.total);
         if (validOffers.length < data.data.length) {
-            console.warn(`Filtered out ${data.data.length - validOffers.length} offers due to missing hotel or price information.`);
+            console.warn(`Filtered out ${data.data.length - validOffers.length} offers due to missing hotel or price information (Server).`);
         }
         if (validOffers.length === 0) {
-             console.log("Amadeus search returned results, but none had valid hotel and price info after filtering.");
+             console.log("Amadeus search returned results, but none had valid hotel and price info after filtering (Server).");
              // No need to throw, just return empty. The UI will handle 'No Results'.
         }
        return validOffers.map(transformAmadeusHotelOffer);
     } else {
-      console.warn("No results array found in Amadeus API response or unexpected format:", data);
+      console.warn("No results array found in Amadeus API response or unexpected format (Server):", data);
       return []; // Return empty array for no results or bad format
     }
 
   } catch (error: any) {
+    // Log the detailed error server-side
     console.error("-----------------------------------------");
-    console.error("Error during Amadeus hotel search process:");
+    console.error("Error during Amadeus hotel search process (Server):");
     console.error(`Timestamp: ${new Date().toISOString()}`);
-    if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
-    if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error("City Code used: NO (failed to obtain or not reached)");
+    console.error(`Search Criteria: ${JSON.stringify(criteria)}`); // Log input criteria
+    if (token) console.error("Token used: YES"); else console.error("Token used: NO");
+    if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error("City Code used: NO");
     if (params) console.error(`Search Params: ${params.toString()}`); else console.error("Search Params: Not generated");
     if (response) {
       console.error(`Fetch Status: ${response.status} ${response.statusText}`);
-      console.error("Fetch Headers (Response):", Object.fromEntries(response.headers.entries()));
+      // Avoid logging large headers unless necessary for debugging
+      // console.error("Fetch Headers (Response):", Object.fromEntries(response.headers.entries()));
     } else {
-       console.error("Fetch Status: Request likely failed before receiving a response (e.g., network error, CORS, DNS).");
+       console.error("Fetch Status: Request likely failed before receiving a response (e.g., network error, DNS).");
     }
-    console.error("Caught Error Object:", error);
+    console.error("Caught Error Object:", error); // Log the full error object
+    console.error("Stack Trace:", error.stack); // Log stack trace if available
     console.error("-----------------------------------------");
 
-    // Attempt to craft a more user-friendly message based on the error type
+    // Craft a more user-friendly message to send back to the client
     let userMessage = "An unexpected error occurred during the hotel search. Please try again later.";
     if (error.message?.includes("Failed to fetch")) {
         userMessage = "Could not connect to the hotel search service. Please check your internet connection and try again.";
     } else if (error.message?.includes("Invalid API Key or Secret")) {
-        userMessage = "There's an issue with the API configuration. Please contact support."; // Avoid exposing specifics
+        // Don't expose key details to client, provide generic config error
+        userMessage = "There's an issue with the connection to the hotel provider. Please contact support if the problem persists.";
     } else if (error.message?.includes("Could not find location code")) {
         userMessage = error.message; // Pass the specific city error through
     } else if (error.message?.includes("check your dates")) {
          userMessage = error.message; // Pass the specific date error through
+    } else if (error.message?.includes("Missing required information")) {
+         userMessage = error.message; // Pass specific missing info error through
+    } else if (error.message?.includes("API credentials missing")) {
+        // Generic message for config issues detected early
+         userMessage = "Hotel search is temporarily unavailable due to a configuration issue. Please try again later.";
     }
-    // Propagate a new error with a potentially more user-friendly message
+
+    // Propagate a new error with the user-friendly message
     throw new Error(userMessage);
   }
 }
 
 /**
- * Simulates booking a hotel.
+ * Simulates booking a hotel. Runs Server-Side.
  * This function would interact with Amadeus's booking APIs in a real app.
  * For now, it remains a simulation, creating a local trip record.
  */
@@ -353,10 +370,10 @@ export async function simulateBookHotel(
   numberOfGuests: number,
   paymentDetails: PaymentDetails // Payment details aren't used in simulation but kept for structure
 ): Promise<Trip> {
-  console.log("Simulating Amadeus booking for hotel:", hotel.name, "with ID:", hotel.id);
+  console.log("Simulating Amadeus booking (Server) for hotel:", hotel.name, "with ID:", hotel.id);
   console.log("Payment method (simulated):", paymentDetails.method);
 
-  // TODO: In a real application, this would involve:
+  // TODO: In a real application, this would involve SERVER-SIDE calls to:
   // 1. Re-fetching the specific offer price (Hotel Offers Pricing API: /v1/shopping/hotel-offers/pricing)
   //    Requires the `offerId` from the search results (needs to be added to transformAmadeusHotelOffer and Hotel type).
   // 2. Creating the booking (Hotel Booking API: /v1/booking/hotel-bookings)
@@ -384,19 +401,25 @@ export async function simulateBookHotel(
     status: 'upcoming', // Status after successful simulated booking
   };
 
-  console.log("Amadeus Booking successful (simulated):", newTrip);
+  console.log("Amadeus Booking successful (simulated, Server):", newTrip);
+  // IMPORTANT: Since addTrip uses localStorage, it MUST be called client-side.
+  // This simulated booking function returns the Trip, and the caller (client-side)
+  // should then call addTrip.
   return newTrip;
 }
 
 
 // --- Local Storage Trip Management ---
+// These functions interact with localStorage and MUST run client-side.
+// They are NOT marked with 'use server'.
 
 /**
- * Retrieves all trips from localStorage.
+ * Retrieves all trips from localStorage. Client-side only.
  */
 export async function getTrips(): Promise<Trip[]> {
   // Ensure this runs only on the client-side
   if (typeof window === 'undefined') {
+    console.warn("Attempted to call getTrips (localStorage) on the server.");
     return [];
   }
   try {
@@ -420,47 +443,56 @@ export async function getTrips(): Promise<Trip[]> {
 }
 
 /**
- * Adds a new trip to localStorage.
+ * Adds a new trip to localStorage. Client-side only.
  */
 export async function addTrip(trip: Trip): Promise<void> {
    // Ensure this runs only on the client-side
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') {
+    console.warn("Attempted to call addTrip (localStorage) on the server.");
+    return;
+  }
     try {
-        const existingTrips = await getTrips();
+        const existingTrips = await getTrips(); // getTrips is client-side safe
         const updatedTrips = [...existingTrips, trip];
         localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
     } catch (error) {
         console.error("Failed to save trip to localStorage:", error);
         // Consider adding user feedback here (e.g., toast notification)
     }
-  }
+
 }
 
 /**
- * Removes a trip from localStorage by ID.
+ * Removes a trip from localStorage by ID. Client-side only.
  */
 export async function removeTrip(tripId: string): Promise<void> {
   // Ensure this runs only on the client-side
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') {
+     console.warn("Attempted to call removeTrip (localStorage) on the server.");
+    return;
+  }
     try {
-      let existingTrips = await getTrips();
+      let existingTrips = await getTrips(); // client-side safe
       const updatedTrips = existingTrips.filter(trip => trip.id !== tripId);
       localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
     } catch (error) {
       console.error("Failed to remove trip from localStorage:", error);
       // Consider user feedback
     }
-  }
+
 }
 
 /**
- * Updates a trip in localStorage (e.g., changing status).
+ * Updates a trip in localStorage (e.g., changing status). Client-side only.
  */
 export async function updateTrip(updatedTrip: Trip): Promise<void> {
   // Ensure this runs only on the client-side
-  if (typeof window !== 'undefined') {
+ if (typeof window === 'undefined') {
+     console.warn("Attempted to call updateTrip (localStorage) on the server.");
+    return;
+  }
     try {
-      let existingTrips = await getTrips();
+      let existingTrips = await getTrips(); // client-side safe
       const updatedTrips = existingTrips.map(trip =>
         trip.id === updatedTrip.id ? updatedTrip : trip
       );
@@ -469,5 +501,5 @@ export async function updateTrip(updatedTrip: Trip): Promise<void> {
       console.error("Failed to update trip in localStorage:", error);
       // Consider user feedback
     }
-  }
+
 }

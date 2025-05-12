@@ -3,7 +3,10 @@
 
 import { useState, useEffect } from 'react';
 import type { Hotel, HotelSearchCriteria, PaymentDetails } from '@/types';
-import { searchHotels, simulateBookHotel, addTrip } from '@/services/booking';
+// Import server functions directly. Next.js handles the Server Action call.
+import { searchHotels, simulateBookHotel } from '@/services/booking';
+// Import client-only function separately
+import { addTrip } from '@/services/booking';
 import { HotelSearchForm } from '@/components/hotel-search-form';
 import { HotelCard } from '@/components/hotel-card';
 import { PaymentForm } from '@/components/payment-form';
@@ -34,6 +37,7 @@ export default function HomePage() {
   const [totalSavings, setTotalSavings] = useState<number>(0);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isConfigError, setIsConfigError] = useState<boolean>(false); // State for API key config error
+  const [bookedHotelName, setBookedHotelName] = useState<string>(''); // To show in success dialog
 
   const { toast } = useToast();
 
@@ -50,25 +54,29 @@ export default function HomePage() {
     setSearchError(null); // Clear previous errors
     setIsConfigError(false); // Reset config error state
     setLastSearchCriteria(criteria);
+    console.log("Initiating search from client..."); // Client-side log
+
     try {
-      // Basic validation moved to searchHotels service
+      // Call the server function 'searchHotels'
+      // Next.js automatically handles the network call for Server Actions
+      console.log("Calling searchHotels server action with criteria:", criteria);
       const results = await searchHotels(criteria);
+      console.log("Received search results on client:", results); // Client-side log
       setSearchResults(results);
+
       if (results.length === 0) {
           console.log("Search returned no results for:", criteria);
           // UI will handle empty results display
       }
     } catch (error: any) {
-      console.error("Search failed (caught in HomePage):", error);
-      // Use the potentially more user-friendly message from the service
+      console.error("Search failed (caught in HomePage on client):", error);
       const errorMessage = error.message || "An unknown error occurred during search.";
       setSearchError(errorMessage);
 
-      // Check if it's the specific configuration error message from booking service
-      // Updated check to look for key parts of the configuration error message
-      if (errorMessage.includes("API credentials missing") || errorMessage.includes("Invalid API Key or Secret")) {
+      // Check for specific error messages passed from the server
+      if (errorMessage.includes("API credentials missing") || errorMessage.includes("connection to the hotel provider") || errorMessage.includes("configuration issue")) {
           setIsConfigError(true);
-          // No need for a toast here, the dedicated UI element will show
+          // No toast needed, dedicated UI element will show
       } else {
          // Show toast for other types of errors (e.g., network, invalid city, date issues)
          toast({
@@ -80,6 +88,7 @@ export default function HomePage() {
       setSearchResults([]); // Ensure results are empty on error
     } finally {
        setIsLoading(false);
+       console.log("Search finished on client."); // Client-side log
     }
   };
 
@@ -90,7 +99,6 @@ export default function HomePage() {
         description: "Please ensure check-in and check-out dates are selected to book.",
         variant: "destructive",
       });
-      // Optionally, focus the date fields or show a more prominent message
       return;
     }
      if (!lastSearchCriteria?.numberOfGuests || lastSearchCriteria.numberOfGuests < 1) {
@@ -116,29 +124,35 @@ export default function HomePage() {
       return;
     }
     setIsBooking(true);
+    const hotelToBook = selectedHotel; // Capture hotel before clearing state
+    setBookedHotelName(hotelToBook.name); // Store name for success dialog
+
     try {
-      // Pass all required info to the booking simulation/API call
+      // Call the server function 'simulateBookHotel'
       const bookedTrip = await simulateBookHotel(
-        selectedHotel,
+        hotelToBook,
         lastSearchCriteria.checkInDate,
         lastSearchCriteria.checkOutDate,
         lastSearchCriteria.numberOfGuests,
         paymentDetails
       );
-      await addTrip(bookedTrip); // Save trip to localStorage
+
+      // IMPORTANT: addTrip interacts with localStorage, so call it client-side AFTER server returns
+      await addTrip(bookedTrip);
+
       setShowPaymentDialog(false);
       setShowBookingSuccessDialog(true);
       toast({
         title: "Booking Successful! (Simulated)",
-        description: `${selectedHotel.name} has been booked.`,
+        description: `${hotelToBook.name} has been booked.`,
       });
        setSelectedHotel(null); // Clear selected hotel after successful booking
        setLastSearchCriteria(prev => prev ? { ...prev, checkInDate: undefined, checkOutDate: undefined } : null); // Optionally clear dates? Or keep them?
-    } catch (error) {
-      console.error("Booking failed:", error);
+    } catch (error: any) {
+      console.error("Booking simulation failed (client):", error);
       toast({
         title: "Booking Failed (Simulation)",
-        description: "Could not complete your booking simulation. Please try again.",
+        description: error.message || "Could not complete your booking simulation. Please try again.",
         variant: "destructive",
       });
       // Keep payment dialog open for retry? Or close? Depends on UX choice.
@@ -151,14 +165,8 @@ export default function HomePage() {
   // Recalculate total amount based on Amadeus price (which might be total)
   const calculateTotalAmount = () => {
     if (!selectedHotel) return 0;
-    // Amadeus /v2/shopping/hotel-offers often returns the TOTAL price for the stay in `pricePerNight` field after transformation.
-    // Let's assume pricePerNight IS the total price from the offer for now.
+    // Assuming pricePerNight IS the total price from the offer for now.
     return selectedHotel.pricePerNight;
-
-    // If pricePerNight was indeed per night:
-    // if (!lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate) return 0;
-    // const nights = Math.ceil((lastSearchCriteria.checkOutDate.getTime() - lastSearchCriteria.checkInDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
-    // return nights * selectedHotel.pricePerNight * (lastSearchCriteria.numberOfGuests || 1); // Might need guest adjustment based on API price basis
   };
 
 
@@ -192,23 +200,18 @@ export default function HomePage() {
        {!isLoading && searchPerformed && searchError && (
          <div className="text-center py-10">
           {isConfigError ? (
-             // Specific UI for Configuration Error
+             // Specific UI for Configuration/Connection Error
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
                  <Info className="h-5 w-5 text-destructive" />
-                <AlertTitle className="font-semibold text-destructive">API Configuration Error</AlertTitle>
+                <AlertTitle className="font-semibold text-destructive">Search Unavailable</AlertTitle>
                 <AlertDescription className="text-destructive/90">
-                    The hotel search feature requires API credentials that are missing or invalid. Please contact the site administrator.
-                    {/* Optional: Display the technical error message for admins/devs */}
-                     <details className="mt-2 text-xs">
-                        <summary className="cursor-pointer hover:underline">Details</summary>
-                        {/* Display the error message state which might contain more detail */}
-                        <p className="mt-1 text-left bg-destructive/10 p-2 rounded border border-destructive/20">{searchError}</p>
-                    </details>
+                   {searchError} {/* Display the user-friendly error from the server */}
+                   <p className="mt-2 text-xs"> Please try again later or contact support if the issue persists.</p>
                 </AlertDescription>
             </Alert>
 
           ) : (
-             // Generic UI for other Search Errors
+             // Generic UI for other Search Errors (e.g., No City Code Found, Invalid Dates)
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
@@ -340,7 +343,7 @@ export default function HomePage() {
               Booking Successful! (Simulated)
             </DialogTitle>
             <DialogDescription>
-              Your simulated eco-trip to <span className="font-semibold">{/* Find a way to show hotel name even after clear */} Trip Confirmed</span> is confirmed.
+              Your simulated eco-trip to <span className="font-semibold">{bookedHotelName}</span> is confirmed.
               Check your "My Trips" page for details.
             </DialogDescription>
           </DialogHeader>
