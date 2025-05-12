@@ -1,3 +1,4 @@
+
 'use server'; // Mark this module's exports as Server Actions
 
 import type {
@@ -15,6 +16,7 @@ const AMADEUS_API_BASE_URL = process.env.AMADEUS_API_BASE_URL || 'https://test.a
 
 /**
  * Transforms an Amadeus hotel offer into our application's Hotel type.
+ * Adjusted for potential variations in V2 response.
  * @param offer The hotel offer object from Amadeus API (V2 structure).
  * @returns A Hotel object.
  */
@@ -24,10 +26,9 @@ export async function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Prom
     const offerPrice = offerDetails?.price;
 
     // Placeholder image logic - Use a consistent placeholder or improve later
-    const imageUrl = `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
+    const imageUrl = hotelData.media?.[0]?.uri || `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
     // In a real app, you might call the Hotel Details API (e.g., GET /v3/shopping/hotel-offers/{offerId})
     // to get actual hotel images if the Offers API doesn't provide them.
-    // const imageUrl = hotelData.media?.[0]?.uri || `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
 
     // Address construction
     const addressParts = [hotelData.address?.lines?.[0], hotelData.address?.cityName, hotelData.address?.postalCode, hotelData.address?.countryCode];
@@ -40,13 +41,13 @@ export async function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Prom
       : ratingValue;
 
     // Amenities - Often limited in the Offers V2 response, might need Details API
+    // Map Amadeus codes/keywords to readable names if needed here or in the component
     const amenities = hotelData.amenities?.slice(0, 6) || []; // Take first 6 or empty array
 
-    // Description - Prefer room description if available
+    // Description - Prefer room description if available, then hotel description
     const roomDescription = offerDetails?.room?.description?.text;
-    // Hotel description might require a separate API call or view=FULL (which is slower)
-    // const hotelDescription = hotelData.description?.text;
-    const description = roomDescription || `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`;
+    const hotelDescription = hotelData.description?.text;
+    const description = roomDescription || hotelDescription || `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`;
 
     return {
         id: hotelData.hotelId || `unknown-${Math.random()}`,
@@ -82,10 +83,11 @@ async function getAmadeusAccessToken(): Promise<string> {
     return cachedToken.token;
   }
 
-  // Ensure API keys are available
-  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-    console.error("SERVER FATAL: Missing Amadeus API Key/Secret in environment variables.");
-    throw new Error("Server configuration error: API credentials missing.");
+  // Ensure API keys are available and not placeholders
+  if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
+      !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+    console.error("SERVER FATAL: Missing or placeholder Amadeus API Key/Secret in environment variables.");
+    throw new Error("Server configuration error: API credentials missing or invalid.");
   }
 
   const url = `${AMADEUS_API_BASE_URL}/v1/security/oauth2/token`;
@@ -205,8 +207,9 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
     }
 
     // Check API key configuration first
-    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-      console.error("SERVER ACTION (suggestLocations): Missing Amadeus API Key/Secret.");
+    if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
+        !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+      console.error("SERVER ACTION (suggestLocations): Missing or placeholder Amadeus API Key/Secret.");
       // Don't throw, just return empty array for suggestions
       return [];
     }
@@ -336,10 +339,11 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     }
 
     // --- API Key Check ---
-    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-        const message = "CRITICAL (Server): Amadeus API Key/Secret are missing. Cannot proceed with search. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are set in server environment.";
+    if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
+        !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+        const message = "CRITICAL (Server): Amadeus API Key/Secret are missing or are placeholders. Cannot proceed with search. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are correctly set in server environment.";
         console.error(message);
-        throw new Error("API credentials missing. Search cannot be performed.");
+        throw new Error("API credentials missing or invalid. Search cannot be performed.");
     }
 
     let token: string | null = null;
@@ -367,6 +371,8 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         params.append('includeClosed', 'false'); // Exclude permanently closed hotels
         params.append('bestRateOnly', 'true'); // Simplify results
         params.append('view', 'LIGHT'); // Faster response, fewer details
+        // Add optional parameters based on Swagger if needed (e.g., ratings, amenities)
+        // params.append('ratings', '4,5'); // Example: Filter for 4 and 5 star hotels
 
 
         const searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`;
@@ -393,20 +399,25 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                    const firstError = errorJson.errors[0];
                    errorCode = firstError.code || errorCode;
                    apiErrorMessage = `Search failed: ${firstError.title || 'Unknown API Error'}. ${firstError.detail || ''} (Code: ${errorCode})`;
-                   
-                   if ([38196, 477, 574, 904].includes(Number(errorCode))) { 
-                       apiErrorMessage = `Sorry, we couldn't find any available hotels for "${criteria.city || cityCode}" for the selected dates (${formatDate(criteria.checkInDate, 'MMM d')} - ${formatDate(criteria.checkOutDate, 'MMM d')}). Please try different dates or another location. (Code: ${errorCode})`;
-                   } else if (firstError.status === 400 || errorCode === 4926) { 
-                        apiErrorMessage = `Search failed: Invalid request format or parameters. Check location, dates, and guest count. (Code: ${errorCode})`;
+
+                   // Refine messages based on common error codes
+                   if ([38196, 477, 574, 904].includes(Number(errorCode))) {
+                       // More specific message for "no availability" or date issues
+                       apiErrorMessage = `No hotels found for ${criteria.cityCode || criteria.city} for the selected dates (${checkInFormatted} to ${checkOutFormatted}). This could be due to no availability or invalid dates/parameters. Please adjust your search. (Code: ${errorCode})`;
+                   } else if (firstError.status === 400 || errorCode === 4926) {
+                       apiErrorMessage = `Search request invalid. Please check the location, dates, and guest count. (Code: ${errorCode})`;
                    } else if (firstError.status === 401) {
-                        apiErrorMessage = `Authentication failed with hotel service. (Code: ${errorCode})`;
+                       apiErrorMessage = `Authentication failed with hotel service. Please contact support if this persists. (Code: ${errorCode})`;
                    } else if (firstError.status === 403) {
-                        apiErrorMessage = `Permission denied by hotel service. (Code: ${errorCode})`;
-                    } else if (firstError.status >= 500) {
-                         apiErrorMessage = `Hotel service temporary error. Please try again later. (Code: ${errorCode})`;
-                    }
+                       apiErrorMessage = `Permission denied by hotel service. Please contact support. (Code: ${errorCode})`;
+                   } else if (firstError.status >= 500) {
+                       apiErrorMessage = `Hotel service temporary error (${response.status}). Please try again later. (Code: ${errorCode})`;
+                   }
                  }
-             } catch (parseError) { /* Ignore JSON parse error */ }
+             } catch (parseError) {
+                 // If error response is not JSON, use the status text but add context
+                 apiErrorMessage = `Hotel service communication error (${response.status} ${response.statusText}). Please try again later.`;
+              }
             throw new Error(apiErrorMessage);
         }
 
@@ -415,7 +426,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         if (data?.data?.length > 0) {
              const validOffers = data.data.filter((offer: AmadeusHotelOffer) =>
                 offer.hotel && offer.hotel.hotelId && offer.hotel.name &&
-                offer.available && offer.offers?.[0]?.price?.total
+                offer.available && offer.offers?.[0]?.price?.total // Ensure core data exists
              );
              console.log(`SERVER (searchHotels): Found ${data.data.length} offers (v2), ${validOffers.length} seem valid and available.`);
 
@@ -426,11 +437,14 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                  return Promise.all(limitedResults.map(transformAmadeusHotelOffer));
              } else {
                  console.log("SERVER (searchHotels): No valid/available offers found after filtering.");
-                  return [];
+                  // Throw a specific error if filtering removed all results but the API call was successful
+                  throw new Error(`While offers were found for ${cityCode}, none met the availability or data requirements after filtering. Try adjusting dates or criteria.`);
              }
         } else {
-            console.log("SERVER (searchHotels): No hotel data array found in v2 response.");
-            return [];
+            console.log("SERVER (searchHotels): No hotel data array found in v2 response (API reported success but no data).");
+            // This scenario implies the API call worked (status 200) but returned an empty data array.
+            // Treat this similar to the 38196 error code scenario.
+            throw new Error(`No hotels found for ${criteria.cityCode || criteria.city} for the selected dates (${checkInFormatted} to ${checkOutFormatted}). Please try different dates or another location.`);
         }
 
     } catch (error: any) {
@@ -445,20 +459,27 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         // console.error("Error Stack:", error.stack); // Can be very verbose
         console.error("-----------------------------------------");
 
-        let userMessage = "An error occurred during the hotel search.";
-         if (error.message.includes("API credentials missing")) {
-             userMessage = "Server configuration error: API credentials missing.";
-         } else if (error.message.includes("Amadeus auth failed")) {
-             userMessage = `Authentication with the hotel service failed.${error.message.includes('Invalid API Key or Secret') ? ' Check server API credentials.' : ''}`;
-         } else if (error.message.includes("Search failed:") || error.message.includes("No hotels found") || error.message.includes("Sorry, we couldn't find any available hotels")) {
-             userMessage = error.message;
-         } else if (error.message.includes("Could not determine location code") || error.message.includes("Failed to prepare search")) {
-             userMessage = error.message; 
-         } else if (error.message.includes("Validation Error:")) {
-             userMessage = error.message; 
-         } else if (error.message.includes('fetch')) { 
+        // Determine the user-facing message based on the error caught
+        let userMessage = "An unexpected error occurred during the hotel search.";
+        if (error.message.includes("API credentials missing or invalid")) {
+            userMessage = "Server configuration error: API credentials missing or invalid.";
+        } else if (error.message.includes("Amadeus auth failed")) {
+             userMessage = `Authentication with the hotel service failed.${error.message.includes('Invalid Credentials') ? ' Check server API credentials.' : ' Please contact support if this persists.'}`;
+        } else if (error.message.includes("Search failed:") || // Specific parsed API errors
+                   error.message.includes("No hotels found") ||
+                   error.message.includes("request invalid") ||
+                   error.message.includes("service temporary error") ||
+                   error.message.includes("service communication error") ||
+                   error.message.includes("none met the availability")) {
+             userMessage = error.message; // Use the already refined message
+        } else if (error.message.includes("Could not determine location code") || error.message.includes("Failed to prepare search")) {
+             userMessage = error.message; // Error during city code lookup
+        } else if (error.message.includes("Validation Error:")) {
+             userMessage = error.message; // Input validation error
+        } else if (error.message.includes('fetch') || error.message.includes('NetworkError')) { // More robust check for network issues
              userMessage = "Network error: Could not reach the hotel search service. Please check your connection or try again later.";
-         }
+        }
+        // Propagate the refined error message
         throw new Error(userMessage);
     }
 }
@@ -489,7 +510,7 @@ export async function simulateBookHotel(
   let paymentValid = false;
   if (paymentDetails.method === 'creditCard' || paymentDetails.method === 'debitCard') {
     // Basic validation simulation
-    paymentValid = !!paymentDetails.cardNumber && paymentDetails.cardNumber.length === 16 &&
+    paymentValid = !!paymentDetails.cardNumber && /^\d{16}$/.test(paymentDetails.cardNumber) && // Ensure 16 digits
                    !!paymentDetails.expiryDate && /^(0[1-9]|1[0-2])\/\d{2}$/.test(paymentDetails.expiryDate) &&
                    !!paymentDetails.cvc && /^\d{3,4}$/.test(paymentDetails.cvc);
   } else if (paymentDetails.method === 'paypal') {
@@ -502,7 +523,8 @@ export async function simulateBookHotel(
   }
 
   // In a real scenario, price might need re-confirmation via Amadeus Pricing API
-  const totalPrice = hotel.pricePerNight; // Assuming pricePerNight holds the total offer price
+  // For simulation, we use the price from the search results.
+  const totalPrice = hotel.pricePerNight; // Assuming pricePerNight holds the total offer price from search
 
   const newTrip: Trip = {
     // Use a more robust unique ID generation if possible
@@ -540,12 +562,13 @@ export async function getTrips(): Promise<Trip[]> {
       return parsedTrips.map(trip => ({
         ...trip,
         // Ensure dates are Date objects
-        checkInDate: trip.checkInDate ? new Date(trip.checkInDate) : null,
-        checkOutDate: trip.checkOutDate ? new Date(trip.checkOutDate): null,
+        checkInDate: trip.checkInDate ? new Date(trip.checkInDate) : new Date(), // Default to now if invalid
+        checkOutDate: trip.checkOutDate ? new Date(trip.checkOutDate): new Date(), // Default to now if invalid
         hotel: trip.hotel || null, // Ensure hotel object exists
       })).filter(trip =>
           trip.hotel && trip.hotel.id && trip.checkInDate && trip.checkOutDate && // Ensure essential data exists
-          !isNaN(trip.checkInDate.getTime()) && !isNaN(trip.checkOutDate.getTime()) // Validate dates
+          !isNaN(trip.checkInDate.getTime()) && !isNaN(trip.checkOutDate.getTime()) && // Validate dates
+          trip.checkOutDate > trip.checkInDate // Ensure checkout is after checkin
       ) as Trip[];
     }
   } catch (error) {
@@ -616,7 +639,12 @@ export async function updateTrip(updatedTrip: Trip): Promise<void> {
       const updatedTrips = existingTrips.map(trip => {
           if (trip.id === updatedTrip.id) {
               found = true;
-              return updatedTrip; // Replace with the updated trip
+              // Ensure dates are still Date objects before stringifying
+              return {
+                  ...updatedTrip,
+                  checkInDate: updatedTrip.checkInDate instanceof Date ? updatedTrip.checkInDate : new Date(updatedTrip.checkInDate),
+                  checkOutDate: updatedTrip.checkOutDate instanceof Date ? updatedTrip.checkOutDate : new Date(updatedTrip.checkOutDate),
+              };
           }
           return trip;
       });
