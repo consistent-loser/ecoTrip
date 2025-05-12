@@ -4,9 +4,11 @@
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
 
 // --- Amadeus API Configuration ---
-// Read directly from server-side environment variables
-const AMADEUS_API_KEY = process.env.AMADEUS_API_KEY;
-const AMADEUS_API_SECRET = process.env.AMADEUS_API_SECRET;
+// Hardcoded credentials as requested by the user.
+// WARNING: Hardcoding sensitive credentials directly in the source code is NOT recommended for production environments.
+//          It's better to use environment variables or a secure secrets management solution.
+const AMADEUS_API_KEY = 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9';
+const AMADEUS_API_SECRET = 'U1MGYukFmZhrjq40';
 const AMADEUS_API_BASE_URL = 'https://test.api.amadeus.com'; // Use https://api.amadeus.com for production
 
 // --- Amadeus Authentication ---
@@ -27,13 +29,7 @@ async function getAmadeusAccessToken(): Promise<string> {
     return accessToken.access_token;
   }
 
-  // Explicitly check if keys are missing *before* making the API call
-  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-      const message = "Amadeus API Key/Secret not configured server-side. Cannot authenticate. Please ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are set in the server environment.";
-      console.error(`AUTH_CONFIG_ERROR: ${message}`);
-      throw new Error("API credentials missing. Search cannot be performed."); // More specific error for internal issue
-  }
-
+  // Removed the check for missing keys from environment variables as they are now hardcoded
   console.log("Fetching new Amadeus token (Server)...");
   try {
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v1/security/oauth2/token`, {
@@ -41,7 +37,7 @@ async function getAmadeusAccessToken(): Promise<string> {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      // Use the keys fetched from server environment variables
+      // Use the hardcoded keys
       body: `grant_type=client_credentials&client_id=${AMADEUS_API_KEY}&client_secret=${AMADEUS_API_SECRET}`,
       // Important for server-side fetches if caching interferes
       cache: 'no-store',
@@ -56,7 +52,7 @@ async function getAmadeusAccessToken(): Promise<string> {
       try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.error === 'invalid_client') {
-            errorMessage = `Amadeus auth failed: Invalid API Key or Secret. Please verify your server-side credentials. (Code: ${errorJson.code || 'N/A'})`;
+            errorMessage = `Amadeus auth failed: Invalid API Key or Secret. Please verify the hardcoded credentials. (Code: ${errorJson.code || 'N/A'})`;
             console.error(">>> Specific Error: Invalid Amadeus Client Credentials (Server) <<<");
          } else if (errorJson.title) {
              errorMessage = `Amadeus auth failed: ${errorJson.title} (Code: ${errorJson.code || 'N/A'})`;
@@ -264,12 +260,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
    // --- End Server-Side Validation ---
 
 
-  // Check if API keys are missing - Crucial first step
-   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-       console.error("CRITICAL (Server): Amadeus API Key/Secret are missing. Cannot proceed with search. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are set in server environment.");
-       throw new Error("API credentials missing. Search cannot be performed.");
-   }
-
+  // Removed check for missing API keys from environment variables
 
   let token: string | null = null;
   let cityCode: string | null = null;
