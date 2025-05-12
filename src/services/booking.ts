@@ -1,4 +1,3 @@
-
 'use server'; // Mark this module's exports as Server Actions
 
 import type {
@@ -8,7 +7,6 @@ import type {
 import { format as formatDate } from 'date-fns'; // Import date-fns for formatting
 
 // --- Amadeus API Configuration (Server-Side) ---
-// Use environment variables on the server for security.
 const AMADEUS_API_KEY = process.env.AMADEUS_API_KEY || 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9';
 const AMADEUS_API_SECRET = process.env.AMADEUS_API_SECRET || 'U1MGYukFmZhrjq40';
 const AMADEUS_API_BASE_URL = process.env.AMADEUS_API_BASE_URL || 'https://test.api.amadeus.com'; // Use test API by default
@@ -127,7 +125,13 @@ async function getAmadeusAccessToken(): Promise<string> {
 
   } catch (error: any) {
     console.error("SERVER Error fetching Amadeus access token:", error);
-    throw new Error(`Failed to get Amadeus token: ${error.message.includes('Invalid API Key or Secret') ? 'Invalid Credentials' : 'Authentication Error'}`);
+    // Check if the error is due to invalid credentials specifically
+     const detailedMessage = error.message.includes('Invalid API Key or Secret')
+        ? 'Invalid Credentials'
+        : error.message.includes('Amadeus auth failed')
+            ? error.message // Use the specific auth failure message
+            : 'Authentication Error';
+    throw new Error(`Failed to get Amadeus token: ${detailedMessage}`);
   }
 }
 
@@ -140,8 +144,8 @@ async function getAmadeusAccessToken(): Promise<string> {
  */
 async function getCityCode(cityName: string, token: string): Promise<string | null> {
     // Use /v1/reference-data/locations/cities for potentially better city matching
-    const url = `${AMADEUS_API_BASE_URL}/v1/reference-data/locations/cities?keyword=${encodeURIComponent(cityName)}`;
-    console.log(`SERVER: Fetching city code for "${cityName}" from: ${url}`);
+    const url = `${AMADEUS_API_BASE_URL}/v1/reference-data/locations/cities?keyword=${encodeURIComponent(cityName)}&page[limit]=5&sort=analytics.travelers.score`;
+    console.log(`SERVER (getCityCode): Fetching city code for "${cityName}" from: ${url}`);
 
     try {
         const response = await fetch(url, {
@@ -152,7 +156,7 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
 
         if (!response.ok) {
             const errorBody = await response.text();
-            console.error(`SERVER Amadeus City Lookup Error (Status ${response.status}) for "${cityName}":`, errorBody);
+            console.error(`SERVER (getCityCode) Amadeus City Lookup Error (Status ${response.status}) for "${cityName}":`, errorBody);
             return null; // Don't throw, handle gracefully
         }
 
@@ -166,21 +170,21 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
                 loc.name?.toUpperCase() === cityName.toUpperCase()
              );
              if (exactMatch && exactMatch.iataCode) {
-                console.log(`SERVER: Found exact city match ${exactMatch.iataCode} for ${cityName}`);
+                console.log(`SERVER (getCityCode): Found exact city match ${exactMatch.iataCode} for ${cityName}`);
                 return exactMatch.iataCode;
              }
 
              // Fallback: Find first CITY result with an IATA code
              const firstCityMatch = data.data.find(loc => loc.subType === 'CITY' && loc.iataCode);
              if (firstCityMatch && firstCityMatch.iataCode) {
-                 console.log(`SERVER: Found fallback city code ${firstCityMatch.iataCode} for ${cityName}`);
+                 console.log(`SERVER (getCityCode): Found fallback city code ${firstCityMatch.iataCode} for ${cityName}`);
                  return firstCityMatch.iataCode;
              }
         }
-        console.warn(`SERVER No usable CITY IATA code found for: ${cityName}`);
+        console.warn(`SERVER (getCityCode) No usable CITY IATA code found for: ${cityName}`);
         return null;
     } catch (error: any) {
-        console.error(`SERVER Error fetching city code for ${cityName}:`, error);
+        console.error(`SERVER (getCityCode) Error fetching city code for ${cityName}:`, error);
         return null; // Don't throw, handle gracefully
     }
 }
@@ -189,11 +193,14 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
  * Fetches location suggestions from Amadeus based on user input. SERVER ACTION.
  * @param query The user's input string.
  * @returns A promise resolving to an array of LocationSuggestion objects.
+ * Returns empty array on error.
  */
 export async function suggestLocations(query: string): Promise<LocationSuggestion[]> {
     console.log(`SERVER ACTION: suggestLocations called with query: "${query}"`);
+    const startTime = Date.now();
 
-    if (!query || query.trim().length < 2) { // Avoid searching for very short strings
+    if (!query || query.trim().length < 2) {
+        console.log("SERVER (suggestLocations): Query too short, returning empty.");
         return [];
     }
 
@@ -207,9 +214,11 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
     let token: string;
     try {
         token = await getAmadeusAccessToken();
-    } catch (error) {
-        console.error("SERVER ACTION (suggestLocations): Failed to get token:", error);
-        return []; // Cannot proceed without token
+    } catch (error: any) {
+        console.error("SERVER ACTION (suggestLocations): Failed to get token:", error.message);
+        // Optionally: re-throw a more specific error if needed upstream
+        // throw new Error(`Suggestion service unavailable: ${error.message}`);
+        return []; // Cannot proceed without token, return empty
     }
 
     // Use /v1/reference-data/locations?subType=CITY,AIRPORT&keyword=...
@@ -221,29 +230,36 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
     params.append('view', 'LIGHT'); // Request less data
 
     const url = `${AMADEUS_API_BASE_URL}/v1/reference-data/locations?${params.toString()}`;
-    console.log(`SERVER (suggestLocations): Fetching from: ${url}`);
+    console.log(`SERVER (suggestLocations): Fetching from URL: ${url}`);
 
     try {
         const response = await fetch(url, {
             method: 'GET',
             headers: { 'Authorization': `Bearer ${token}` },
-            cache: 'no-store', // Suggestions should be fresh
+            cache: 'no-store', // Suggestions should be relatively fresh
         });
 
+        const responseBodyText = await response.text(); // Read body once
+        const duration = Date.now() - startTime;
+
         if (!response.ok) {
-            const errorBody = await response.text();
-            console.error(`SERVER Amadeus Location Suggestion Error (Status ${response.status}):`, errorBody);
-            return []; // Return empty on error
+            console.error(`SERVER (suggestLocations) Amadeus Error (Status ${response.status}, Duration: ${duration}ms):`, responseBodyText);
+            // Don't throw from here, return empty to allow graceful UI handling
+             // Depending on status, could return a specific message if needed
+             // if (response.status === 401) return Promise.reject(new Error("Authentication failed"));
+            return [];
         }
 
-        const data: AmadeusLocationApiResponse = await response.json();
+        const data: AmadeusLocationApiResponse = JSON.parse(responseBodyText);
+        console.log(`SERVER (suggestLocations): Received response (Duration: ${duration}ms). Found ${data?.data?.length || 0} raw locations.`);
 
         if (data?.data?.length > 0) {
             // Transform the response into our LocationSuggestion format
-            return data.data
+            const suggestions = data.data
                 .filter(loc => loc.subType === 'CITY' && loc.iataCode) // Ensure it's a city with an IATA code
                 .map((loc: AmadeusLocation): LocationSuggestion => ({
                     id: loc.iataCode || loc.id, // Prefer IATA code as ID
+                    // Handle potentially missing countryCode gracefully
                     name: `${loc.name}${loc.address?.countryCode ? `, ${loc.address.countryCode}` : ''}`, // e.g., "Paris, FR"
                     iataCode: loc.iataCode,
                     subType: loc.subType,
@@ -253,13 +269,17 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
                         countryCode: loc.address?.countryCode,
                     },
                 }));
+            console.log(`SERVER (suggestLocations): Filtered to ${suggestions.length} valid suggestions.`);
+            return suggestions;
         } else {
-            console.log(`SERVER (suggestLocations): No locations found for query "${query}".`);
+            console.log(`SERVER (suggestLocations): No CITY locations with IATA codes found for query "${query}".`);
             return [];
         }
 
     } catch (error: any) {
-        console.error(`SERVER Error fetching location suggestions for "${query}":`, error);
+        const duration = Date.now() - startTime;
+        console.error(`SERVER (suggestLocations) Error fetching/processing suggestions for "${query}" (Duration: ${duration}ms):`, error);
+        // Avoid throwing to prevent breaking the form, return empty
         return [];
     }
 }
@@ -273,35 +293,44 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
  */
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
     console.log("SERVER ACTION: searchHotels (v2) called with criteria:", criteria);
+    const startTime = Date.now();
 
     // --- Criteria Validation ---
-    // V2 Requires cityCode, checkInDate, checkOutDate, numberOfGuests
-    if (!criteria.cityCode) {
+    let cityCode = criteria.cityCode; // Use mutable variable for potential lookup
+
+    if (!cityCode) {
        // If cityCode is missing, try to derive it from the city name
         if (!criteria.city) {
+            console.error("SERVER (searchHotels): Missing city name or city code.");
             throw new Error("Missing required search criteria: City name or City Code is required.");
         }
-        console.warn(`SERVER: cityCode missing, attempting lookup for city: ${criteria.city}`);
+        console.warn(`SERVER (searchHotels): cityCode missing, attempting lookup for city: ${criteria.city}`);
+         let tokenForLookup: string | null = null;
          try {
-            const tokenForLookup = await getAmadeusAccessToken();
-            criteria.cityCode = await getCityCode(criteria.city, tokenForLookup);
-            if (!criteria.cityCode) {
-                throw new Error(`Could not determine location code for city: "${criteria.city}". Please select a valid location.`);
+            tokenForLookup = await getAmadeusAccessToken();
+            cityCode = await getCityCode(criteria.city, tokenForLookup); // Assign lookup result
+            if (!cityCode) {
+                console.error(`SERVER (searchHotels): Failed lookup for city: ${criteria.city}`);
+                throw new Error(`Could not determine location code for city: "${criteria.city}". Please select a valid location from suggestions.`);
             }
-             console.log(`SERVER: Using derived cityCode ${criteria.cityCode} for search.`);
+             console.log(`SERVER (searchHotels): Using derived cityCode ${cityCode} for search.`);
          } catch(lookupError: any){
-             // Catch errors from token/city lookup specifically
+             console.error("SERVER (searchHotels): Error during token/city lookup:", lookupError);
+             // Rethrow with context
              throw new Error(`Failed to prepare search: ${lookupError.message}`);
          }
     }
-    if (!criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests) {
-        throw new Error("Missing required search criteria: Check-in/out dates and number of guests are required.");
+    if (!criteria.checkInDate || !criteria.checkOutDate) {
+         console.error("SERVER (searchHotels): Missing check-in or check-out date.");
+        throw new Error("Missing required search criteria: Check-in and check-out dates are required.");
     }
-    if (criteria.checkOutDate <= criteria.checkInDate) {
-        throw new Error("Validation Error: Check-out date must be after check-in date.");
-    }
+     if (criteria.checkOutDate <= criteria.checkInDate) {
+         console.error("SERVER (searchHotels): Invalid date range.");
+         throw new Error("Validation Error: Check-out date must be after check-in date.");
+     }
     // Basic check for guests
-    if (criteria.numberOfGuests < 1) {
+    if (!criteria.numberOfGuests || criteria.numberOfGuests < 1) {
+        console.error("SERVER (searchHotels): Invalid number of guests.");
         throw new Error("Validation Error: Number of guests must be at least 1.");
     }
 
@@ -316,11 +345,9 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
     try {
         // 1. Get Access Token
-        console.log("SERVER: Getting Access Token...");
+        console.log("SERVER (searchHotels): Getting Access Token...");
         token = await getAmadeusAccessToken();
-        console.log("SERVER: Access Token obtained.");
-
-        // City code is now expected to be in criteria.cityCode
+        console.log("SERVER (searchHotels): Access Token obtained.");
 
         // 3. Perform Hotel Search using Amadeus V2
         // Format dates correctly (YYYY-MM-DD)
@@ -328,18 +355,22 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         const checkOutFormatted = formatDate(criteria.checkOutDate, 'yyyy-MM-dd');
 
         const params = new URLSearchParams();
-        params.append('cityCode', criteria.cityCode); // V2 requires cityCode
+        params.append('cityCode', cityCode); // V2 requires cityCode (ensured by validation above)
         params.append('checkInDate', checkInFormatted);
         params.append('checkOutDate', checkOutFormatted);
         params.append('adults', criteria.numberOfGuests.toString());
         params.append('roomQuantity', '1'); // Assuming 1 room
-        params.append('ratings', '2,3,4,5'); // Example: Only search for 2-star and above
+        // params.append('ratings', '2,3,4,5'); // Example: Only search for 2-star and above - REMOVED FOR BROADER SEARCH
         params.append('currency', 'USD');
         params.append('lang', 'EN');
+        params.append('paymentPolicy', 'NONE'); // Filter out hotels requiring immediate payment details
+        params.append('includeClosed', 'false'); // Exclude permanently closed hotels
+        params.append('bestRateOnly', 'true'); // Simplify results
         params.append('view', 'LIGHT'); // Faster response, fewer details
 
+
         const searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`;
-        console.log(`SERVER: Attempting to fetch Amadeus V2 Hotel Offers: ${searchUrl}`);
+        console.log(`SERVER (searchHotels): Attempting to fetch Amadeus V2 Hotel Offers: ${searchUrl}`);
 
         const response = await fetch(searchUrl, {
             method: 'GET',
@@ -347,11 +378,13 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
             cache: 'no-store', // Don't cache search results
         });
 
-        console.log(`SERVER: Amadeus V2 Search Response Status: ${response.status}`);
         const responseBodyText = await response.text(); // Read body once
+        const duration = Date.now() - startTime;
+        console.log(`SERVER (searchHotels): Amadeus V2 Search Response Status: ${response.status} (Duration: ${duration}ms)`);
+
 
         if (!response.ok) {
-            console.error("SERVER Amadeus V2 Search Error Body:", responseBodyText);
+            console.error(`SERVER (searchHotels) Amadeus V2 Search Error (Status ${response.status}):`, responseBodyText);
             let apiErrorMessage = `Amadeus v2 hotel search failed: ${response.status} ${response.statusText}`;
             let errorCode: string | number = response.status;
              try {
@@ -360,14 +393,20 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                    const firstError = errorJson.errors[0];
                    errorCode = firstError.code || errorCode;
                    apiErrorMessage = `Search failed: ${firstError.title || 'Unknown API Error'}. ${firstError.detail || ''} (${errorCode})`;
-                   // Specific error handling
-                   if (errorCode === 38196 || errorCode === 477 || errorCode === 574) {
-                       apiErrorMessage = `No hotels found for ${criteria.city || criteria.cityCode} on these dates, or the dates/parameters are invalid. Please check your search. (${errorCode})`;
-                   } else if (firstError.status === 400) {
-                        apiErrorMessage = `Search failed: Invalid request. Check location, dates, and guest count. (${errorCode})`;
-                   }
+                   // Specific error handling based on observed codes
+                   if ([38196, 477, 574, 904].includes(Number(errorCode))) { // 904 also seen for "NO_HOTEL_FOUND"
+                       apiErrorMessage = `No hotels found for ${criteria.city || cityCode} on these dates, or the dates/parameters are invalid. Please check your search. (${errorCode})`;
+                   } else if (firstError.status === 400 || errorCode === 4926) { // 4926: "INVALID FORMAT"
+                        apiErrorMessage = `Search failed: Invalid request format or parameters. Check location, dates, and guest count. (${errorCode})`;
+                   } else if (firstError.status === 401) {
+                        apiErrorMessage = `Authentication failed with hotel service. (${errorCode})`;
+                   } else if (firstError.status === 403) {
+                        apiErrorMessage = `Permission denied by hotel service. (${errorCode})`;
+                    } else if (firstError.status >= 500) {
+                         apiErrorMessage = `Hotel service temporary error. Please try again later. (${errorCode})`;
+                    }
                  }
-             } catch (parseError) { /* Ignore */ }
+             } catch (parseError) { /* Ignore JSON parse error */ }
             throw new Error(apiErrorMessage);
         }
 
@@ -378,41 +417,52 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                 offer.hotel && offer.hotel.hotelId && offer.hotel.name &&
                 offer.available && offer.offers?.[0]?.price?.total
              );
-             console.log(`SERVER: Found ${data.data.length} offers (v2), ${validOffers.length} seem valid and available.`);
+             console.log(`SERVER (searchHotels): Found ${data.data.length} offers (v2), ${validOffers.length} seem valid and available.`);
 
              if (validOffers.length > 0) {
-                 return Promise.all(validOffers.map(transformAmadeusHotelOffer));
+                 // Limit results for performance if needed
+                 const limitedResults = validOffers.slice(0, 20); // Example: limit to 20
+                 console.log(`SERVER (searchHotels): Transforming ${limitedResults.length} valid offers.`);
+                 return Promise.all(limitedResults.map(transformAmadeusHotelOffer));
              } else {
-                 console.log("SERVER: No valid/available offers found after filtering.");
+                 console.log("SERVER (searchHotels): No valid/available offers found after filtering.");
                   return [];
              }
         } else {
-            console.log("SERVER: No hotel data array found in v2 response.");
+            console.log("SERVER (searchHotels): No hotel data array found in v2 response.");
             return [];
         }
 
     } catch (error: any) {
+        const duration = Date.now() - startTime;
         console.error("-----------------------------------------");
-        console.error("SERVER Error during Amadeus v2 hotel search process:");
-        console.error(`Timestamp: ${new Date().toISOString()}`);
+        console.error("SERVER (searchHotels) Error during Amadeus v2 hotel search process:");
+        console.error(`Timestamp: ${new Date().toISOString()} (Duration: ${duration}ms)`);
         if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
-        if (criteria.cityCode) console.error(`City Code used: ${criteria.cityCode}`); else console.error(`City Code used: NO (not provided or lookup failed)`);
-        console.error("Search Criteria:", criteria);
+        if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error(`City Code used: NO (not provided or lookup failed)`);
+        console.error("Search Criteria:", criteria); // Log the original criteria
+        console.error("Error Caught:", error); // Log the full error object
         console.error("Error Message:", error.message);
         console.error("-----------------------------------------");
 
+        // Determine user-friendly message based on caught error
         let userMessage = "An error occurred during the hotel search.";
          if (error.message.includes("API credentials missing")) {
              userMessage = "Server configuration error: API credentials missing.";
          } else if (error.message.includes("Amadeus auth failed")) {
              userMessage = `Authentication with the hotel service failed. ${error.message.includes('Invalid Credentials') ? ' (Invalid Credentials)' : ''}`;
-         } else if (error.message.includes("Search failed") || error.message.includes("No hotels found")) {
-             userMessage = error.message; // Use specific message from API if available
+         } else if (error.message.includes("Search failed:") || error.message.includes("No hotels found")) {
+             // Use the specific message from API if available and parsed correctly
+             userMessage = error.message;
          } else if (error.message.includes("Could not determine location code") || error.message.includes("Failed to prepare search")) {
              userMessage = error.message; // Pass specific lookup/preparation error
          } else if (error.message.includes("Validation Error:")) {
              userMessage = error.message; // Pass validation error
+         } else if (error.message.includes('fetch')) { // Generic fetch error
+             userMessage = "Network error: Could not reach the hotel search service. Please check your connection or try again later.";
          }
+
+        // Propagate a new error with the user-friendly message
         throw new Error(userMessage);
     }
 }
@@ -442,9 +492,12 @@ export async function simulateBookHotel(
 
   let paymentValid = false;
   if (paymentDetails.method === 'creditCard' || paymentDetails.method === 'debitCard') {
-    paymentValid = !!paymentDetails.cardNumber && !!paymentDetails.expiryDate && !!paymentDetails.cvc;
+    // Basic validation simulation
+    paymentValid = !!paymentDetails.cardNumber && paymentDetails.cardNumber.length === 16 &&
+                   !!paymentDetails.expiryDate && /^(0[1-9]|1[0-2])\/\d{2}$/.test(paymentDetails.expiryDate) &&
+                   !!paymentDetails.cvc && /^\d{3,4}$/.test(paymentDetails.cvc);
   } else if (paymentDetails.method === 'paypal') {
-    paymentValid = !!paymentDetails.paypalEmail;
+    paymentValid = !!paymentDetails.paypalEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentDetails.paypalEmail);
   }
 
   if (!paymentValid) {
@@ -452,16 +505,18 @@ export async function simulateBookHotel(
     throw new Error("Simulated payment validation failed. Please check payment details.");
   }
 
-  const totalPrice = hotel.pricePerNight; // Assuming total price
+  // In a real scenario, price might need re-confirmation via Amadeus Pricing API
+  const totalPrice = hotel.pricePerNight; // Assuming pricePerNight holds the total offer price
 
   const newTrip: Trip = {
+    // Use a more robust unique ID generation if possible
     id: `trip-amadeus-server-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     hotel,
     checkInDate,
     checkOutDate,
     numberOfGuests,
     totalPrice: totalPrice,
-    status: 'upcoming',
+    status: 'upcoming', // Default status for new booking
   };
 
   console.log("SERVER ACTION: Booking successful (simulated):", newTrip.id);
@@ -470,26 +525,36 @@ export async function simulateBookHotel(
 
 
 // --- Local Storage Trip Management (Client-Side Functions) ---
+// NOTE: These functions run ONLY in the browser. They are marked async
+//       for consistency but don't perform network requests themselves.
 
 /**
  * Retrieves all trips from localStorage. Client-side only.
  */
 export async function getTrips(): Promise<Trip[]> {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === 'undefined') {
+     console.warn("CLIENT getTrips: Called outside browser, returning empty array.");
+     return [];
+   }
   try {
     const tripsJson = localStorage.getItem('ecoTrips');
     if (tripsJson) {
       const parsedTrips: any[] = JSON.parse(tripsJson);
+       // Robust parsing with date/hotel validation
       return parsedTrips.map(trip => ({
         ...trip,
-        checkInDate: trip.checkInDate ? new Date(trip.checkInDate) : new Date(),
-        checkOutDate: trip.checkOutDate ? new Date(trip.checkOutDate): new Date(),
-        hotel: trip.hotel || {},
-      })).filter(trip => trip.hotel && trip.hotel.id && !isNaN(trip.checkInDate.getTime()) && !isNaN(trip.checkOutDate.getTime()));
+        // Ensure dates are Date objects
+        checkInDate: trip.checkInDate ? new Date(trip.checkInDate) : null,
+        checkOutDate: trip.checkOutDate ? new Date(trip.checkOutDate): null,
+        hotel: trip.hotel || null, // Ensure hotel object exists
+      })).filter(trip =>
+          trip.hotel && trip.hotel.id && trip.checkInDate && trip.checkOutDate && // Ensure essential data exists
+          !isNaN(trip.checkInDate.getTime()) && !isNaN(trip.checkOutDate.getTime()) // Validate dates
+      ) as Trip[];
     }
   } catch (error) {
     console.error("CLIENT: Failed to parse trips from localStorage:", error);
-    localStorage.removeItem('ecoTrips');
+    localStorage.removeItem('ecoTrips'); // Clear potentially corrupt data
   }
   return [];
 }
@@ -498,14 +563,23 @@ export async function getTrips(): Promise<Trip[]> {
  * Adds a new trip to localStorage. Client-side only.
  */
 export async function addTrip(trip: Trip): Promise<void> {
-  if (typeof window === 'undefined') return;
+   if (typeof window === 'undefined') {
+     console.warn("CLIENT addTrip: Called outside browser, operation skipped.");
+     return;
+   }
     try {
         const existingTrips = await getTrips();
+        // Prevent adding duplicates (simple check by ID)
+        if (existingTrips.some(t => t.id === trip.id)) {
+            console.warn(`CLIENT addTrip: Trip with ID ${trip.id} already exists.`);
+            return;
+        }
         const updatedTrips = [...existingTrips, trip];
         localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
         console.log("CLIENT: Trip added to localStorage:", trip.id);
     } catch (error) {
         console.error("CLIENT: Failed to save trip to localStorage:", error);
+         // Optional: Notify user of storage issue
     }
 }
 
@@ -513,12 +587,20 @@ export async function addTrip(trip: Trip): Promise<void> {
  * Removes a trip from localStorage by ID. Client-side only.
  */
 export async function removeTrip(tripId: string): Promise<void> {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') {
+      console.warn("CLIENT removeTrip: Called outside browser, operation skipped.");
+      return;
+    }
     try {
       let existingTrips = await getTrips();
       const updatedTrips = existingTrips.filter(trip => trip.id !== tripId);
-      localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
-      console.log("CLIENT: Trip removed from localStorage:", tripId);
+      // Check if a trip was actually removed
+      if (existingTrips.length !== updatedTrips.length) {
+          localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
+          console.log("CLIENT: Trip removed from localStorage:", tripId);
+      } else {
+           console.warn("CLIENT removeTrip: Trip not found with ID:", tripId);
+      }
     } catch (error) {
       console.error("CLIENT: Failed to remove trip from localStorage:", error);
     }
@@ -528,14 +610,27 @@ export async function removeTrip(tripId: string): Promise<void> {
  * Updates a trip in localStorage (e.g., changing status). Client-side only.
  */
 export async function updateTrip(updatedTrip: Trip): Promise<void> {
- if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') {
+     console.warn("CLIENT updateTrip: Called outside browser, operation skipped.");
+     return;
+   }
     try {
       let existingTrips = await getTrips();
-      const updatedTrips = existingTrips.map(trip =>
-        trip.id === updatedTrip.id ? updatedTrip : trip
-      );
-      localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
-       console.log("CLIENT: Trip updated in localStorage:", updatedTrip.id);
+      let found = false;
+      const updatedTrips = existingTrips.map(trip => {
+          if (trip.id === updatedTrip.id) {
+              found = true;
+              return updatedTrip; // Replace with the updated trip
+          }
+          return trip;
+      });
+
+      if (found) {
+          localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
+          console.log("CLIENT: Trip updated in localStorage:", updatedTrip.id);
+      } else {
+          console.warn("CLIENT updateTrip: Trip not found with ID:", updatedTrip.id);
+      }
     } catch (error) {
       console.error("CLIENT: Failed to update trip in localStorage:", error);
     }
