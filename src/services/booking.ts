@@ -194,9 +194,6 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
   console.log("Searching Amadeus hotels with criteria:", criteria);
 
-   // First, check if the environment variables are set. getAmadeusAccessToken will handle this now.
-   // No need for the redundant check here if getAmadeusAccessToken throws properly.
-
   const { city, checkInDate, checkOutDate, numberOfGuests } = criteria;
 
   // Validate required criteria *before* attempting API calls
@@ -217,20 +214,33 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       throw new Error("Please specify at least one guest.");
   }
 
+  // Check if API keys are actually missing or empty *before* attempting to get token
+   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+       console.error("CRITICAL: Amadeus API Key/Secret are missing. Cannot proceed with search. Set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET.");
+       // Throw a specific configuration error
+       throw new Error("API credentials missing. Search cannot be performed.");
+   }
+
+
+  let token: string | null = null;
+  let cityCode: string | null = null;
+  let response: Response | null = null;
+  const searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers`;
+  let params: URLSearchParams | null = null;
 
   try {
     // Get token - This will throw if auth fails (e.g., bad keys, network issues)
-    const token = await getAmadeusAccessToken();
+    token = await getAmadeusAccessToken();
 
     // Get City Code
-    const cityCode = await getCityCode(city, token);
+    cityCode = await getCityCode(city, token);
     if (!cityCode) {
       console.warn(`Could not find IATA city code for ${city}. Cannot search Amadeus.`);
       throw new Error(`Could not find location code for "${city}". Please try a different city name or spelling.`);
     }
 
     // Prepare Search Parameters
-    const params = new URLSearchParams({
+    params = new URLSearchParams({
       cityCode: cityCode,
       checkInDate: checkInDate.toISOString().split('T')[0],
       checkOutDate: checkOutDate.toISOString().split('T')[0],
@@ -243,10 +253,11 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       // Consider adding sort: 'PRICE' or 'DISTANCE' if needed
     });
 
-    console.log(`Amadeus Search URL: ${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`);
+    const fullSearchUrl = `${searchUrl}?${params.toString()}`;
+    console.log(`Attempting Amadeus Search: GET ${fullSearchUrl}`);
 
     // Perform Hotel Search
-    const response = await fetch(`${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`, {
+    response = await fetch(fullSearchUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -255,14 +266,14 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Amadeus Hotel Search Error Response Body:", errorBody);
+      console.error(`Amadeus Hotel Search Error Response Body (Status ${response.status}):`, errorBody);
        // Try to parse the error for more specific feedback
        let apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}`;
        try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.errors && errorJson.errors.length > 0) {
            const firstError = errorJson.errors[0];
-           console.error(`Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
+           console.error(`Parsed Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
            // Customize message based on common error codes if desired
            if (firstError.code === 38196) { // Example: Invalid date format or range
                 apiErrorMessage = `Search failed: ${firstError.title}. Please check your dates.`;
@@ -298,15 +309,35 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       return []; // Return empty array for no results or bad format
     }
 
-  } catch (error) {
-    console.error("Error during hotel search process:", error);
-    // Propagate the error so the UI can display it
-    if (error instanceof Error) {
-        throw error; // Re-throw the caught error (could be auth, config, validation, or API error)
+  } catch (error: any) {
+    console.error("-----------------------------------------");
+    console.error("Error during Amadeus hotel search process:");
+    console.error(`Timestamp: ${new Date().toISOString()}`);
+    if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
+    if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error("City Code used: NO (failed to obtain or not reached)");
+    if (params) console.error(`Search Params: ${params.toString()}`); else console.error("Search Params: Not generated");
+    if (response) {
+      console.error(`Fetch Status: ${response.status} ${response.statusText}`);
+      console.error("Fetch Headers (Response):", Object.fromEntries(response.headers.entries()));
     } else {
-        // Should not happen often, but catch non-Error throws
-        throw new Error("An unknown error occurred during hotel search.");
+       console.error("Fetch Status: Request likely failed before receiving a response (e.g., network error, CORS, DNS).");
     }
+    console.error("Caught Error Object:", error);
+    console.error("-----------------------------------------");
+
+    // Attempt to craft a more user-friendly message based on the error type
+    let userMessage = "An unexpected error occurred during the hotel search. Please try again later.";
+    if (error.message?.includes("Failed to fetch")) {
+        userMessage = "Could not connect to the hotel search service. Please check your internet connection and try again.";
+    } else if (error.message?.includes("Invalid API Key or Secret")) {
+        userMessage = "There's an issue with the API configuration. Please contact support."; // Avoid exposing specifics
+    } else if (error.message?.includes("Could not find location code")) {
+        userMessage = error.message; // Pass the specific city error through
+    } else if (error.message?.includes("check your dates")) {
+         userMessage = error.message; // Pass the specific date error through
+    }
+    // Propagate a new error with a potentially more user-friendly message
+    throw new Error(userMessage);
   }
 }
 
@@ -379,7 +410,7 @@ export async function getTrips(): Promise<Trip[]> {
         checkOutDate: new Date(trip.checkOutDate),
         // Ensure hotel object structure is maintained (it should be if saved correctly)
         hotel: trip.hotel || {}, // Basic check for hotel object
-      })).filter(trip => trip.hotel.id); // Filter out trips missing hotel ID just in case
+      })).filter(trip => trip.hotel && trip.hotel.id); // Filter out trips missing hotel ID just in case
     }
   } catch (error) {
     console.error("Failed to parse trips from localStorage:", error);

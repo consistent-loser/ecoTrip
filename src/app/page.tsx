@@ -59,19 +59,21 @@ export default function HomePage() {
           // UI will handle empty results display
       }
     } catch (error: any) {
-      console.error("Search failed:", error);
+      console.error("Search failed (caught in HomePage):", error);
+      // Use the potentially more user-friendly message from the service
       const errorMessage = error.message || "An unknown error occurred during search.";
       setSearchError(errorMessage);
 
       // Check if it's the specific configuration error message from booking service
-      if (errorMessage.includes("Amadeus API Key/Secret not configured") || errorMessage.includes("Invalid API Key or Secret")) {
+      // Updated check to look for key parts of the configuration error message
+      if (errorMessage.includes("API credentials missing") || errorMessage.includes("Invalid API Key or Secret")) {
           setIsConfigError(true);
           // No need for a toast here, the dedicated UI element will show
       } else {
          // Show toast for other types of errors (e.g., network, invalid city, date issues)
          toast({
             title: "Search Error",
-            description: errorMessage,
+            description: errorMessage, // Show the potentially improved message
             variant: "destructive",
          });
       }
@@ -199,6 +201,7 @@ export default function HomePage() {
                     {/* Optional: Display the technical error message for admins/devs */}
                      <details className="mt-2 text-xs">
                         <summary className="cursor-pointer hover:underline">Details</summary>
+                        {/* Display the error message state which might contain more detail */}
                         <p className="mt-1 text-left bg-destructive/10 p-2 rounded border border-destructive/20">{searchError}</p>
                     </details>
                 </AlertDescription>
@@ -209,6 +212,7 @@ export default function HomePage() {
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
+                {/* Show the potentially more user-friendly error message */}
                 <p className="text-muted-foreground max-w-md mx-auto">{searchError}</p>
                 {lastSearchCriteria && (
                     <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-6">
