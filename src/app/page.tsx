@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -17,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank } from 'lucide-react';
+import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash } from 'lucide-react'; // Added ServerCrash
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
@@ -31,6 +32,7 @@ export default function HomePage() {
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [lastSearchCriteria, setLastSearchCriteria] = useState<HotelSearchCriteria | null>(null);
   const [totalSavings, setTotalSavings] = useState<number>(0);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const { toast } = useToast();
 
@@ -43,15 +45,27 @@ export default function HomePage() {
   const handleSearch = async (criteria: HotelSearchCriteria) => {
     setIsLoading(true);
     setSearchPerformed(true);
+    setSearchResults([]); // Clear previous results
+    setSearchError(null); // Clear previous errors
     setLastSearchCriteria(criteria);
     try {
+      // Basic validation before API call
+      if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate) {
+          throw new Error("Please provide a destination city, check-in date, and check-out date.");
+      }
       const results = await searchHotels(criteria);
       setSearchResults(results);
-    } catch (error) {
+      if (results.length === 0) {
+          console.log("Search returned no results for:", criteria);
+          // No need to set an error message here, the UI will handle empty results display
+      }
+    } catch (error: any) {
       console.error("Search failed:", error);
+      const errorMessage = error.message || "Could not fetch hotel results. Please check your connection or search criteria and try again.";
+      setSearchError(errorMessage);
       toast({
         title: "Search Error",
-        description: "Could not fetch hotel results. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
       setSearchResults([]);
@@ -63,10 +77,19 @@ export default function HomePage() {
     if (!lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate) {
       toast({
         title: "Missing Dates",
-        description: "Please select check-in and check-out dates to book.",
+        description: "Please ensure check-in and check-out dates are selected to book.",
         variant: "destructive",
       });
+      // Optionally, focus the date fields or show a more prominent message
       return;
+    }
+     if (!lastSearchCriteria?.numberOfGuests || lastSearchCriteria.numberOfGuests < 1) {
+      toast({
+        title: "Missing Guests",
+        description: "Please ensure the number of guests is specified.",
+        variant: "destructive",
+      });
+       return;
     }
     setSelectedHotel(hotel);
     setShowPaymentDialog(true);
@@ -76,13 +99,15 @@ export default function HomePage() {
     if (!selectedHotel || !lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate || !lastSearchCriteria?.numberOfGuests) {
       toast({
         title: "Booking Error",
-        description: "Missing booking information. Please try again.",
+        description: "Missing booking information. Please start the search again.",
         variant: "destructive",
       });
+      setShowPaymentDialog(false); // Close dialog if critical info is missing
       return;
     }
     setIsBooking(true);
     try {
+      // Pass all required info to the booking simulation/API call
       const bookedTrip = await simulateBookHotel(
         selectedHotel,
         lastSearchCriteria.checkInDate,
@@ -94,24 +119,36 @@ export default function HomePage() {
       setShowPaymentDialog(false);
       setShowBookingSuccessDialog(true);
       toast({
-        title: "Booking Successful!",
+        title: "Booking Successful! (Simulated)",
         description: `${selectedHotel.name} has been booked.`,
       });
+       setSelectedHotel(null); // Clear selected hotel after successful booking
+       setLastSearchCriteria(prev => prev ? { ...prev, checkInDate: undefined, checkOutDate: undefined } : null); // Optionally clear dates? Or keep them?
     } catch (error) {
       console.error("Booking failed:", error);
       toast({
-        title: "Booking Failed",
-        description: "Could not complete your booking. Please try again.",
+        title: "Booking Failed (Simulation)",
+        description: "Could not complete your booking simulation. Please try again.",
         variant: "destructive",
       });
+      // Keep payment dialog open for retry? Or close? Depends on UX choice.
+      // setShowPaymentDialog(false);
     }
     setIsBooking(false);
   };
-  
+
+  // Recalculate total amount based on Amadeus price (which might be total)
   const calculateTotalAmount = () => {
-    if (!selectedHotel || !lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate) return 0;
-    const nights = Math.ceil((lastSearchCriteria.checkOutDate.getTime() - lastSearchCriteria.checkInDate.getTime()) / (1000 * 60 * 60 * 24));
-    return nights * selectedHotel.pricePerNight * (lastSearchCriteria.numberOfGuests || 1);
+    if (!selectedHotel) return 0;
+    // Amadeus /v2/shopping/hotel-offers often returns the TOTAL price for the stay in `pricePerNight` field after transformation.
+    // If pricePerNight truly represents per night, the old calculation is fine.
+    // Let's assume pricePerNight IS the total price from the offer for now.
+    return selectedHotel.pricePerNight;
+
+    // If pricePerNight was indeed per night:
+    // if (!lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate) return 0;
+    // const nights = Math.ceil((lastSearchCriteria.checkOutDate.getTime() - lastSearchCriteria.checkInDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
+    // return nights * selectedHotel.pricePerNight * (lastSearchCriteria.numberOfGuests || 1); // Might need guest adjustment based on API price basis
   };
 
 
@@ -124,30 +161,47 @@ export default function HomePage() {
         <div className="relative z-10">
             <h1 className="text-4xl md:text-5xl font-bold text-primary-foreground mb-4">Find Your Perfect Eco-Stay</h1>
             <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl mx-auto">
-            Discover sustainable hotels and unique accommodations that care for our planet.
+            Discover sustainable hotels and unique accommodations that care for our planet. Search real inventory with Amadeus.
             </p>
         </div>
         <div className="relative z-10 max-w-4xl mx-auto px-4">
+             {/* Ensure form is reset or defaults are appropriate */}
              <HotelSearchForm onSearch={handleSearch} isLoading={isLoading} />
         </div>
       </section>
 
+      {/* Loading State */}
       {isLoading && (
         <div className="flex justify-center items-center py-10">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="ml-4 text-lg">Finding amazing eco-stays for you...</p>
+          <p className="ml-4 text-lg">Searching for eco-friendly hotels via Amadeus...</p>
         </div>
       )}
 
-      {!isLoading && searchPerformed && searchResults.length === 0 && (
+      {/* Error State */}
+       {!isLoading && searchPerformed && searchError && (
+         <div className="text-center py-10">
+          <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
+          <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
+          <p className="text-muted-foreground max-w-md mx-auto">{searchError}</p>
+           <Button onClick={() => lastSearchCriteria && handleSearch(lastSearchCriteria)} className="mt-4">
+              Retry Search
+            </Button>
+        </div>
+      )}
+
+
+      {/* No Results State */}
+      {!isLoading && searchPerformed && !searchError && searchResults.length === 0 && (
          <div className="text-center py-10">
           <SearchX className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
           <h3 className="text-2xl font-semibold mb-2">No Hotels Found</h3>
-          <p className="text-muted-foreground">We couldn't find any hotels matching your criteria. Try a different search?</p>
+          <p className="text-muted-foreground max-w-md mx-auto">We couldn't find any hotels matching your criteria via Amadeus. Try adjusting your dates, destination, or filters.</p>
         </div>
       )}
 
-      {!isLoading && searchResults.length > 0 && (
+      {/* Success State - Results Found */}
+      {!isLoading && !searchError && searchResults.length > 0 && (
         <section>
           <h2 className="text-3xl font-semibold mb-8 text-center">
             Available Hotels in <span className="text-primary">{lastSearchCriteria?.city}</span>
@@ -160,8 +214,9 @@ export default function HomePage() {
         </section>
       )}
 
-      {!isLoading && !searchPerformed && (
-        <section className="py-16">
+      {/* Initial State - Why Choose Us Section */}
+      {!isLoading && !searchPerformed && !searchError && (
+         <section className="py-16">
             <div className="text-center mb-12">
                 <h2 className="text-3xl font-semibold mb-6 text-primary">Why Choose ecoTrip.com?</h2>
                 <p className="text-muted-foreground max-w-2xl mx-auto">
@@ -179,7 +234,7 @@ export default function HomePage() {
                         <RefreshCcw className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
                         <h3 className="text-2xl font-semibold mb-3">Eco Rebooking: Save More, Effortlessly</h3>
                         <p className="text-muted-foreground leading-relaxed mb-4">
-                            Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier.
+                            Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier. (Feature coming soon!)
                         </p>
                         <div className="mt-6 bg-primary/10 p-6 rounded-lg shadow-md">
                             <div className="flex items-center justify-center md:justify-start text-primary mb-2">
@@ -189,7 +244,7 @@ export default function HomePage() {
                                 </span>
                             </div>
                             <p className="text-center md:text-left text-sm text-muted-foreground font-medium">
-                                Total saved by our users so far!
+                                Total saved by our users so far! (Simulated)
                             </p>
                         </div>
                     </div>
@@ -204,7 +259,7 @@ export default function HomePage() {
                         <Leaf className="h-12 w-12 text-accent mx-auto md:mx-0 mb-4" />
                         <h3 className="text-2xl font-semibold mb-3">Travel Green: Prioritizing Low-Emission Hotels</h3>
                         <p className="text-muted-foreground leading-relaxed">
-                            We emphasize eco-friendly hotels that are actively working to reduce their carbon emissions and environmental impact. Make a positive choice for the planet by selecting accommodations that align with your sustainable values.
+                            We emphasize eco-friendly hotels that are actively working to reduce their carbon emissions and environmental impact. Make a positive choice for the planet by selecting accommodations that align with your sustainable values. (Based on available data)
                         </p>
                     </div>
                 </div>
@@ -218,18 +273,23 @@ export default function HomePage() {
       )}
 
 
+      {/* Payment Dialog */}
       {selectedHotel && (
-        <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+        <Dialog open={showPaymentDialog} onOpenChange={(isOpen) => {
+            setShowPaymentDialog(isOpen);
+            if (!isOpen) setSelectedHotel(null); // Clear selected hotel when dialog closes
+            }}>
           <DialogContent className="sm:max-w-[480px]">
             <DialogHeader>
-              <DialogTitle>Complete Your Booking</DialogTitle>
+              <DialogTitle>Complete Your Booking (Simulation)</DialogTitle>
               <DialogDescription>
-                You're about to book <span className="font-semibold">{selectedHotel.name}</span>. 
-                Please provide payment details.
+                You're about to book <span className="font-semibold">{selectedHotel.name}</span>.
+                Total Price: <span className="font-semibold">${calculateTotalAmount().toFixed(2)} {selectedHotel.currency}</span> for the stay.
+                Please provide payment details for this simulation.
               </DialogDescription>
             </DialogHeader>
-            <PaymentForm 
-              onSubmit={handlePaymentSubmit} 
+            <PaymentForm
+              onSubmit={handlePaymentSubmit}
               isProcessing={isBooking}
               totalAmount={calculateTotalAmount()}
             />
@@ -237,15 +297,16 @@ export default function HomePage() {
         </Dialog>
       )}
 
+      {/* Booking Success Dialog */}
       <Dialog open={showBookingSuccessDialog} onOpenChange={setShowBookingSuccessDialog}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle className="flex items-center">
               <PartyPopper className="h-6 w-6 mr-2 text-primary" />
-              Booking Successful!
+              Booking Successful! (Simulated)
             </DialogTitle>
             <DialogDescription>
-              Your eco-trip to <span className="font-semibold">{selectedHotel?.name}</span> is confirmed. 
+              Your simulated eco-trip to <span className="font-semibold">{/* Find a way to show hotel name even after clear */} Trip Confirmed</span> is confirmed.
               Check your "My Trips" page for details.
             </DialogDescription>
           </DialogHeader>
@@ -261,4 +322,3 @@ export default function HomePage() {
     </div>
   );
 }
-

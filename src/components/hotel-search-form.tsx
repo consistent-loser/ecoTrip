@@ -21,19 +21,33 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
+// Updated schema: Make dates required for Amadeus search
 const hotelSearchSchema = z.object({
   city: z.string().min(2, { message: 'City must be at least 2 characters.' }),
-  checkInDate: z.date().optional(),
-  checkOutDate: z.date().optional(),
-  numberOfGuests: z.coerce.number().min(1, { message: 'At least 1 guest required.' }).max(10, { message: 'Maximum 10 guests.' }),
+  checkInDate: z.date({
+    required_error: "Check-in date is required.",
+    invalid_type_error: "Invalid date format.",
+  }),
+  checkOutDate: z.date({
+     required_error: "Check-out date is required.",
+     invalid_type_error: "Invalid date format.",
+  }),
+  numberOfGuests: z.coerce
+                    .number({ invalid_type_error: "Guests must be a number."})
+                    .min(1, { message: 'At least 1 guest required.' })
+                    .max(10, { message: 'Maximum 10 guests.' }),
 }).refine(data => {
+  // Ensure checkOutDate is strictly after checkInDate
   if (data.checkInDate && data.checkOutDate) {
-    return data.checkOutDate > data.checkInDate;
+    // Compare dates only (ignore time)
+    const checkInDay = new Date(data.checkInDate.setHours(0,0,0,0));
+    const checkOutDay = new Date(data.checkOutDate.setHours(0,0,0,0));
+    return checkOutDay > checkInDay;
   }
-  return true;
+  return true; // Let individual date validation handle missing dates
 }, {
   message: "Check-out date must be after check-in date.",
-  path: ["checkOutDate"],
+  path: ["checkOutDate"], // Apply error to checkOutDate field
 });
 
 type HotelSearchFormValues = z.infer<typeof hotelSearchSchema>;
@@ -49,17 +63,27 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
     defaultValues: {
       city: '',
       numberOfGuests: 1,
+      // Set default check-in/out dates? e.g., today and tomorrow
+      // checkInDate: new Date(),
+      // checkOutDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
     },
   });
 
   function onSubmit(data: HotelSearchFormValues) {
-    onSearch(data);
+    // Data types are guaranteed by Zod and useForm
+    onSearch({
+      city: data.city,
+      checkInDate: data.checkInDate, // Now guaranteed to be a Date
+      checkOutDate: data.checkOutDate, // Now guaranteed to be a Date
+      numberOfGuests: data.numberOfGuests,
+    });
   }
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-6 p-6 bg-secondary/50 rounded-lg shadow">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+      {/* Removed spacing class 'gap-6' from form, added 'items-end' to grid */}
+      <form onSubmit={form.handleSubmit(onSubmit)} className="p-6 bg-secondary/50 rounded-lg shadow">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end mb-4"> {/* Added mb-4 */}
           <FormField
             control={form.control}
             name="city"
@@ -67,7 +91,7 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
               <FormItem>
                 <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> Destination</FormLabel>
                 <FormControl>
-                  <Input placeholder="E.g., Greenville, Metro City" {...field} className="bg-background"/>
+                  <Input placeholder="E.g., Paris, London" {...field} className="bg-background"/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -144,9 +168,13 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
                       mode="single"
                       selected={field.value}
                       onSelect={field.onChange}
-                      disabled={(date) => 
-                        date < (form.getValues("checkInDate") || new Date(new Date().setHours(0,0,0,0)))
-                      }
+                       disabled={(date) => {
+                         const today = new Date(new Date().setHours(0,0,0,0));
+                         const checkInDateValue = form.getValues("checkInDate");
+                         const minDate = checkInDateValue ? new Date(new Date(checkInDateValue).getTime() + 24 * 60 * 60 * 1000) : new Date(today.getTime() + 24 * 60 * 60 * 1000);
+                         minDate.setHours(0,0,0,0); // Ensure we compare dates only
+                         return date < minDate;
+                       }}
                       initialFocus
                     />
                   </PopoverContent>
@@ -155,7 +183,7 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
               </FormItem>
             )}
           />
-          
+
           <FormField
             control={form.control}
             name="numberOfGuests"
@@ -163,18 +191,17 @@ export function HotelSearchForm({ onSearch, isLoading = false }: HotelSearchForm
               <FormItem className="w-full">
                 <FormLabel className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Guests</FormLabel>
                 <FormControl>
-                  <Input type="number" placeholder="1" {...field} className="bg-background"/>
+                  <Input type="number" placeholder="1" {...field} min="1" max="10" className="bg-background"/>
                 </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
         </div>
-        <Button type="submit" disabled={isLoading} className="w-full self-center h-12 text-lg">
+        <Button type="submit" disabled={isLoading} className="w-full h-12 text-lg"> {/* Removed self-center */}
           <Search className="mr-2 h-5 w-5" /> {isLoading ? 'Searching...' : 'Search Hotels'}
         </Button>
       </form>
     </Form>
   );
 }
-
