@@ -1,5 +1,6 @@
 
 
+
 export interface Hotel {
   id: string;
   name: string;
@@ -27,7 +28,8 @@ export interface Trip {
 }
 
 export interface HotelSearchCriteria {
-  city: string;
+  city: string; // This might store the selected city name or IATA code
+  cityCode?: string; // Store the IATA code explicitly if needed for search
   checkInDate?: Date; // Made optional to allow flexibility, but Amadeus requires them
   checkOutDate?: Date; // Made optional to allow flexibility, but Amadeus requires them
   numberOfGuests: number;
@@ -146,6 +148,65 @@ export interface AmadeusHotelOffer {
   self?: string; // Link to this specific hotel offer result
 }
 
-// Interface for the expected structure of a hotel object from Booking.com API
-// REMOVED - No longer needed as we switch to Amadeus
-// export interface BookingComHotel { ... }
+
+// --- Location Suggestion Types ---
+
+// Simplified structure for our app's suggestions list
+export interface LocationSuggestion {
+  id: string; // Unique ID for the suggestion (e.g., IATA code or generated)
+  name: string; // Display name (e.g., "Paris, France" or "Charles De Gaulle Airport (CDG)")
+  iataCode?: string; // IATA code if available (useful for hotel search)
+  subType: string; // e.g., "CITY", "AIRPORT"
+  address?: {
+    cityName?: string;
+    countryName?: string;
+    countryCode?: string;
+  };
+}
+
+// Type matching the expected structure from Amadeus /v1/reference-data/locations API
+export interface AmadeusLocation {
+    type: string; // "location"
+    subType: string; // "CITY", "AIRPORT", "POINT_OF_INTEREST" etc.
+    name: string;
+    detailedName?: string;
+    id: string; // Amadeus location ID
+    self?: {
+        href: string;
+        methods: string[];
+    };
+    timeZoneOffset?: string;
+    iataCode?: string; // Important for linking to hotel search
+    geoCode?: {
+        latitude: number;
+        longitude: number;
+    };
+    address?: {
+        cityName?: string;
+        cityCode?: string;
+        countryName?: string;
+        countryCode?: string;
+        stateCode?: string;
+        regionCode?: string;
+    };
+    analytics?: {
+        travelers?: {
+            score: number;
+        };
+    };
+    // relationship is only present when searching for related locations (e.g. airport's city)
+    // relationship?: { id: string; type: string; relationshipType: string; }[]
+}
+
+export interface AmadeusLocationApiResponse {
+    meta?: {
+        count: number;
+        links?: {
+            self: string;
+            next?: string;
+            last?: string;
+        };
+    };
+    data: AmadeusLocation[];
+    warnings?: any[]; // Define more specific warning type if needed
+}
