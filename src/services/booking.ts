@@ -1,3 +1,4 @@
+
 'use server'; // Mark this module's exports as Server Actions
 
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
@@ -15,7 +16,7 @@ const AMADEUS_API_BASE_URL = process.env.AMADEUS_API_BASE_URL || 'https://test.a
 
 /**
  * Transforms an Amadeus hotel offer into our application's Hotel type.
- * @param offer The hotel offer object from Amadeus API.
+ * @param offer The hotel offer object from Amadeus API (V2 structure).
  * @returns A Hotel object.
  */
 export async function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Promise<Hotel> {
@@ -23,33 +24,40 @@ export async function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Prom
     const offerDetails = offer.offers?.[0]; // Get the first offer
     const offerPrice = offerDetails?.price;
 
-    // Placeholder image logic
-    const imageUrl = hotelData.media?.[0]?.uri || `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
+    // Placeholder image logic - Use a consistent placeholder or improve later
+    const imageUrl = `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
+    // In a real app, you might call the Hotel Details API (e.g., GET /v3/shopping/hotel-offers/{offerId})
+    // to get actual hotel images if the Offers API doesn't provide them.
+    // const imageUrl = hotelData.media?.[0]?.uri || `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
 
     // Address construction
     const addressParts = [hotelData.address?.lines?.[0], hotelData.address?.cityName, hotelData.address?.postalCode, hotelData.address?.countryCode];
     const address = addressParts.filter(Boolean).join(', ');
 
-    // Rating
-    const rating = hotelData.rating ? parseInt(hotelData.rating, 10) : 0;
+    // Rating - Amadeus rating is often a string, convert carefully
+    const ratingValue = hotelData.rating ? parseInt(hotelData.rating, 10) : 0;
+    const rating = isNaN(ratingValue) || ratingValue < 1 || ratingValue > 5
+      ? parseFloat((Math.random() * 1.5 + 3.0).toFixed(1)) // Fallback random rating if invalid
+      : ratingValue;
 
-    // Amenities
-    const amenities = hotelData.amenities || [];
+    // Amenities - Often limited in the Offers V2 response, might need Details API
+    const amenities = hotelData.amenities?.slice(0, 6) || []; // Take first 6 or empty array
 
-    // Description
+    // Description - Prefer room description if available
     const roomDescription = offerDetails?.room?.description?.text;
-    const hotelDescription = hotelData.description?.text;
-    const description = roomDescription || hotelDescription || `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`;
+    // Hotel description might require a separate API call or view=FULL (which is slower)
+    // const hotelDescription = hotelData.description?.text;
+    const description = roomDescription || `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`;
 
     return {
         id: hotelData.hotelId || `unknown-${Math.random()}`,
         name: hotelData.name || 'Hotel Name Unavailable',
         address: address || 'Address Unavailable',
         city: hotelData.address?.cityName || 'City Unavailable',
-        pricePerNight: offerPrice?.total ? parseFloat(offerPrice.total) : 0,
+        pricePerNight: offerPrice?.total ? parseFloat(offerPrice.total) : 0, // V2 often provides TOTAL price
         imageUrl: imageUrl,
-        rating: rating > 0 && rating <= 5 ? rating : parseFloat((Math.random() * 1.5 + 3).toFixed(1)), // Ensure number
-        amenities: amenities.slice(0, 6),
+        rating: rating, // Use the validated/fallback rating
+        amenities: amenities,
         latitude: hotelData.latitude,
         longitude: hotelData.longitude,
         description: description,
@@ -130,7 +138,8 @@ async function getAmadeusAccessToken(): Promise<string> {
  * @returns The city code string or null if not found.
  */
 async function getCityCode(cityName: string, token: string): Promise<string | null> {
-    const url = `${AMADEUS_API_BASE_URL}/v1/reference-data/locations?subType=CITY&keyword=${encodeURIComponent(cityName)}`;
+    // Use /v1/reference-data/locations/cities for potentially better city matching
+    const url = `${AMADEUS_API_BASE_URL}/v1/reference-data/locations/cities?keyword=${encodeURIComponent(cityName)}`;
     console.log(`SERVER: Fetching city code for "${cityName}" from: ${url}`);
 
     try {
@@ -153,7 +162,6 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
         if (data?.data?.length > 0) {
              // Prioritize exact city matches with IATA codes
             const cityMatch = data.data.find((loc: any) =>
-                loc.subType === 'CITY' &&
                 loc.iataCode &&
                 loc.name?.toUpperCase() === cityName.toUpperCase()
             );
@@ -161,15 +169,9 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
                 console.log(`SERVER: Found exact city match ${cityMatch.iataCode} for ${cityName}`);
                 return cityMatch.iataCode;
             }
-             // Fallback: Find first CITY type with an IATA code
-            const firstCityWithCode = data.data.find((loc: any) => loc.subType === 'CITY' && loc.iataCode);
-             if (firstCityWithCode) {
-                 console.log(`SERVER: Found fallback city code ${firstCityWithCode.iataCode} for ${cityName}`);
-                 return firstCityWithCode.iataCode;
-             }
-            // Fallback: Find first result with an IATA code (less ideal)
+             // Fallback: Find first result with an IATA code (less ideal but required for V2 search)
              if (data.data[0].iataCode) {
-                 console.log(`SERVER: Found fallback non-city code ${data.data[0].iataCode} for ${cityName}`);
+                 console.log(`SERVER: Found fallback code ${data.data[0].iataCode} for ${cityName}`);
                  return data.data[0].iataCode;
              }
         }
@@ -183,15 +185,15 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
 
 
 /**
- * Searches for hotels using the Amadeus API V1. SERVER ACTION.
+ * Searches for hotels using the Amadeus API V2. SERVER ACTION.
  * @param criteria The search criteria.
  * @returns A promise resolving to an array of Hotel objects.
  * @throws Error if the search fails or API is misconfigured.
  */
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
-    console.log("SERVER ACTION: searchHotels (v1) called with criteria:", criteria);
+    console.log("SERVER ACTION: searchHotels (v2) called with criteria:", criteria);
 
-    // Validate required criteria for Amadeus
+    // Validate required criteria for Amadeus V2
     if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests) {
         throw new Error("Missing required search criteria (City, Dates, Guests).");
     }
@@ -212,41 +214,38 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         token = await getAmadeusAccessToken();
         console.log("SERVER: Access Token obtained.");
 
-        // 2. Get City Code
+        // 2. Get City Code (Required for V2)
         console.log(`SERVER: Getting City Code for ${criteria.city}...`);
         cityCode = await getCityCode(criteria.city, token);
          if (!cityCode) {
-             console.warn(`SERVER: No city code found for ${criteria.city}. Search might fail or be inaccurate.`);
-              throw new Error(`Search cannot be performed for "${criteria.city}" without a valid location code. Please try a different city name or spelling known to Amadeus.`);
+             console.warn(`SERVER: No city code found for ${criteria.city}. Search cannot proceed.`);
+             throw new Error(`Search cannot be performed for "${criteria.city}" without a valid location code. Please try a different city name or spelling known to Amadeus.`);
          } else {
             console.log(`SERVER: Using City Code ${cityCode}.`);
          }
 
-        // 3. Perform Hotel Search using Amadeus V1
+        // 3. Perform Hotel Search using Amadeus V2
         // Format dates correctly (YYYY-MM-DD)
         const checkInFormatted = formatDate(criteria.checkInDate, 'yyyy-MM-dd');
         const checkOutFormatted = formatDate(criteria.checkOutDate, 'yyyy-MM-dd');
 
         const params = new URLSearchParams();
-         if (cityCode) {
-             params.append('cityCode', cityCode);
-         } else {
-               console.error("SERVER: Critical error - cityCode is null, cannot proceed with Amadeus v1 search.");
-               throw new Error("Location code could not be determined for the search.");
-         }
+        params.append('cityCode', cityCode); // V2 requires cityCode
         params.append('checkInDate', checkInFormatted);
         params.append('checkOutDate', checkOutFormatted);
         params.append('adults', criteria.numberOfGuests.toString());
-        // V1 specific or commonly used parameters:
-        // params.append('radius', '20'); // Search radius
-        // params.append('radiusUnit', 'KM');
-        // params.append('currency', 'USD'); // Usually defaults or can be set
-        // params.append('lang', 'EN');
-        // params.append('view', 'LIGHT'); // LIGHT view might be faster
+        // Optional V2 parameters:
+        params.append('roomQuantity', '1'); // Assuming 1 room
+        // params.append('paymentPolicy', 'NONE'); // Filter by payment policy if needed
+        // params.append('bestRateOnly', 'true');
+        params.append('ratings', '2,3,4,5'); // Example: Only search for 2-star and above
+        params.append('currency', 'USD'); // Specify currency if needed
+        params.append('lang', 'EN');
+        params.append('view', 'LIGHT'); // Use LIGHT for faster response, fewer details
 
-        // *** Change endpoint to v1 ***
-        const searchUrl = `${AMADEUS_API_BASE_URL}/v1/shopping/hotel-offers?${params.toString()}`;
-        console.log(`SERVER: Attempting to fetch Amadeus V1 Hotel Offers: ${searchUrl}`);
+        // *** Change endpoint to v2 ***
+        const searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`;
+        console.log(`SERVER: Attempting to fetch Amadeus V2 Hotel Offers: ${searchUrl}`);
 
         const response = await fetch(searchUrl, {
             method: 'GET',
@@ -256,12 +255,12 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
             cache: 'no-store', // Don't cache search results
         });
 
-        console.log(`SERVER: Amadeus V1 Search Response Status: ${response.status}`);
+        console.log(`SERVER: Amadeus V2 Search Response Status: ${response.status}`);
         const responseBodyText = await response.text(); // Read body once
 
         if (!response.ok) {
-            console.error("SERVER Amadeus V1 Search Error Body:", responseBodyText);
-            let apiErrorMessage = `Amadeus v1 hotel search failed: ${response.status} ${response.statusText}`;
+            console.error("SERVER Amadeus V2 Search Error Body:", responseBodyText);
+            let apiErrorMessage = `Amadeus v2 hotel search failed: ${response.status} ${response.statusText}`;
             let errorCode: string | number = response.status; // Default to HTTP status
              try {
                  const errorJson = JSON.parse(responseBodyText);
@@ -270,8 +269,8 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                    errorCode = firstError.code || errorCode; // Use Amadeus code if available
                    apiErrorMessage = `Search failed: ${firstError.title || 'Unknown API Error'}. ${firstError.detail || ''} (${errorCode})`;
                    // Specific error handling based on code
-                   if (errorCode === 38196 || errorCode === 477) { // Invalid date / No hotel found
-                       apiErrorMessage = `No hotels found for ${criteria.city} on these dates, or the dates are invalid. Please check your search. (${errorCode})`;
+                   if (errorCode === 38196 || errorCode === 477 || errorCode === 574) { // Invalid date / No hotel found / Invalid Parameter
+                       apiErrorMessage = `No hotels found for ${criteria.city} on these dates, or the dates/parameters are invalid. Please check your search. (${errorCode})`;
                    } else if (firstError.status === 400) { // Bad request general
                         apiErrorMessage = `Search failed: Invalid request. Check city name, dates, and guest count. (${errorCode})`;
                    }
@@ -283,43 +282,40 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         const data = JSON.parse(responseBodyText);
 
         if (data?.data?.length > 0) {
-             // Filter for offers that have essential info
+             // Filter for offers that have essential info (ID, name, price)
              const validOffers = data.data.filter((offer: AmadeusHotelOffer) =>
                 offer.hotel &&
                 offer.hotel.hotelId &&
                 offer.hotel.name &&
-                offer.offers?.[0]?.price?.total
+                offer.available && // Ensure the offer itself is marked available
+                offer.offers?.[0]?.price?.total // Ensure there's a price
              );
-             console.log(`SERVER: Found ${data.data.length} offers (v1), ${validOffers.length} seem valid.`);
+             console.log(`SERVER: Found ${data.data.length} offers (v2), ${validOffers.length} seem valid and available.`);
 
              if (validOffers.length > 0) {
                  // Transform valid offers using the helper function
-                 // Use Promise.all since transformAmadeusHotelOffer is async now
                  return Promise.all(validOffers.map(transformAmadeusHotelOffer));
              } else {
-                 console.log("SERVER: No valid offers found after filtering (missing name, ID, or price).");
+                 console.log("SERVER: No valid/available offers found after filtering (missing name, ID, price, or marked unavailable).");
                   return []; // Return empty array, UI will show "No results"
              }
         } else {
-            console.log("SERVER: No hotel data array found in v1 response.");
+            console.log("SERVER: No hotel data array found in v2 response.");
             return []; // Return empty array
         }
 
     } catch (error: any) {
         console.error("-----------------------------------------");
-        console.error("SERVER Error during Amadeus v1 hotel search process:");
+        console.error("SERVER Error during Amadeus v2 hotel search process:");
         console.error(`Timestamp: ${new Date().toISOString()}`);
         if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
         if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error(`City Code used: NO (failed lookup or not reached)`);
         console.error("Search Criteria:", criteria);
         console.error("Error Message:", error.message);
-        // Removed detailed stack trace logging for brevity in this context, can be re-added if needed for deep debugging
-        // console.error("Stack Trace:", error.stack);
         console.error("-----------------------------------------");
 
         // Rethrow the error so the client-side UI can catch it and display a message
-        // Ensure the message is somewhat user-friendly
-         let userMessage = "An error occurred during the hotel search.";
+        let userMessage = "An error occurred during the hotel search.";
          if (error.message.includes("API credentials missing")) {
              userMessage = "Server configuration error: API credentials missing.";
          } else if (error.message.includes("Amadeus auth failed")) {
@@ -359,11 +355,10 @@ export async function simulateBookHotel(
 
   // TODO: Add real Amadeus booking API calls here in a production app.
   // This would involve:
-  // 1. Re-fetching the specific offer price using the offer ID (to ensure price hasn't changed).
-  //    - Requires passing the offer ID from the client during the 'Book Now' click.
-  //    - Amadeus API: GET /v1/shopping/hotel-offers/{offerId} (or similar pricing endpoint) - Note: V1 might use different endpoint
+  // 1. Fetching the specific offer price using the offer ID (to ensure price hasn't changed).
+  //    - Amadeus API: GET /v3/shopping/hotel-offers/{offerId}
   // 2. Creating the booking with traveler details and payment info.
-  //    - Amadeus API: POST /v1/booking/hotel-bookings
+  //    - Amadeus API: POST /v1/booking/hotel-bookings (Note: Booking API might still be v1)
   //    - This requires handling sensitive traveler data securely.
 
   // Simulate network delay for the booking process
@@ -383,7 +378,7 @@ export async function simulateBookHotel(
   }
 
   // Simulate successful booking
-  const totalPrice = hotel.pricePerNight; // Assuming pricePerNight is total stay price
+  const totalPrice = hotel.pricePerNight; // Assuming pricePerNight is total stay price from V2
 
   const newTrip: Trip = {
     id: `trip-amadeus-server-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -485,5 +480,3 @@ export async function updateTrip(updatedTrip: Trip): Promise<void> {
       console.error("CLIENT: Failed to update trip in localStorage:", error);
     }
 }
-
-// Removed CLIENT_AMADEUS_CONFIG constant
