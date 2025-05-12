@@ -8,15 +8,16 @@ import type {
 import { format as formatDate } from 'date-fns'; // Import date-fns for formatting
 
 // --- Amadeus API Configuration (Server-Side) ---
-const AMADEUS_API_KEY = process.env.AMADEUS_API_KEY || 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9';
-const AMADEUS_API_SECRET = process.env.AMADEUS_API_SECRET || 'U1MGYukFmZhrjq40';
+// Rely solely on environment variables for credentials
+const AMADEUS_API_KEY = process.env.AMADEUS_API_KEY;
+const AMADEUS_API_SECRET = process.env.AMADEUS_API_SECRET;
 const AMADEUS_API_BASE_URL = process.env.AMADEUS_API_BASE_URL || 'https://test.api.amadeus.com'; // Use test API by default
 
 // --- Helper Functions ---
 
 /**
  * Transforms an Amadeus hotel offer into our application's Hotel type.
- * Adjusted for potential variations in V2 response.
+ * Adjusted for potential variations in V2 response. SERVER-SIDE ONLY.
  * @param offer The hotel offer object from Amadeus API (V2 structure).
  * @returns A Hotel object.
  */
@@ -83,10 +84,10 @@ async function getAmadeusAccessToken(): Promise<string> {
     return cachedToken.token;
   }
 
-  // Ensure API keys are available and not placeholders
-  if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
-      !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-    console.error("SERVER FATAL: Missing or placeholder Amadeus API Key/Secret in environment variables.");
+  // Ensure API keys are available from environment variables
+  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+    console.error("SERVER FATAL: Missing Amadeus API Key/Secret in environment variables. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are correctly set.");
+    // Throw a specific error indicating configuration issue
     throw new Error("Server configuration error: API credentials missing or invalid.");
   }
 
@@ -132,7 +133,9 @@ async function getAmadeusAccessToken(): Promise<string> {
         ? 'Invalid Credentials'
         : error.message.includes('Amadeus auth failed')
             ? error.message // Use the specific auth failure message
-            : 'Authentication Error';
+            : error.message.includes('Server configuration error') // Pass through config error
+                ? error.message
+                : 'Authentication Error';
     throw new Error(`Failed to get Amadeus token: ${detailedMessage}`);
   }
 }
@@ -207,9 +210,8 @@ export async function suggestLocations(query: string): Promise<LocationSuggestio
     }
 
     // Check API key configuration first
-    if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
-        !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-      console.error("SERVER ACTION (suggestLocations): Missing or placeholder Amadeus API Key/Secret.");
+    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+      console.error("SERVER ACTION (suggestLocations): Missing Amadeus API Key/Secret in environment variables.");
       // Don't throw, just return empty array for suggestions
       return [];
     }
@@ -314,7 +316,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         console.warn(`SERVER (searchHotels): cityCode missing, attempting lookup for city: ${criteria.city}`);
          let tokenForLookup: string | null = null;
          try {
-            tokenForLookup = await getAmadeusAccessToken();
+            tokenForLookup = await getAmadeusAccessToken(); // This will throw if credentials are bad
             cityCode = await getCityCode(criteria.city, tokenForLookup); // Assign lookup result
             if (!cityCode) {
                 console.error(`SERVER (searchHotels): Failed lookup for city: ${criteria.city}`);
@@ -323,7 +325,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
              console.log(`SERVER (searchHotels): Using derived cityCode ${cityCode} for search.`);
          } catch(lookupError: any){
              console.error("SERVER (searchHotels): Error during token/city lookup:", lookupError);
-             // Rethrow with context
+             // Rethrow with context - this is where the user error likely originated
              throw new Error(`Failed to prepare search: ${lookupError.message}`);
          }
     }
@@ -338,21 +340,22 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         throw new Error("Validation Error: Number of guests must be at least 1.");
     }
 
-    // --- API Key Check ---
-    if (!AMADEUS_API_KEY || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9' ||
-        !AMADEUS_API_SECRET || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-        const message = "CRITICAL (Server): Amadeus API Key/Secret are missing or are placeholders. Cannot proceed with search. Ensure AMADEUS_API_KEY and AMADEUS_API_SECRET are correctly set in server environment.";
+    // --- API Key Check (Redundant here if getAmadeusAccessToken already checks, but good safeguard) ---
+    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+        const message = "CRITICAL (Server): Amadeus API Key/Secret are missing in environment. Cannot proceed with search.";
         console.error(message);
-        throw new Error("API credentials missing or invalid. Search cannot be performed.");
+        throw new Error("Server configuration error: API credentials missing.");
     }
+
 
     let token: string | null = null;
 
     try {
-        // 1. Get Access Token
-        console.log("SERVER (searchHotels): Getting Access Token...");
+        // 1. Get Access Token (Might already be cached, or fetched if needed)
+        // The check for keys happens within getAmadeusAccessToken now.
+        console.log("SERVER (searchHotels): Getting Access Token (may use cache)...");
         token = await getAmadeusAccessToken();
-        console.log("SERVER (searchHotels): Access Token obtained.");
+        console.log("SERVER (searchHotels): Access Token available.");
 
         // 3. Perform Hotel Search using Amadeus V2
         // Format dates correctly (YYYY-MM-DD)
@@ -461,9 +464,10 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
         // Determine the user-facing message based on the error caught
         let userMessage = "An unexpected error occurred during the hotel search.";
-        if (error.message.includes("API credentials missing or invalid")) {
-            userMessage = "Server configuration error: API credentials missing or invalid.";
-        } else if (error.message.includes("Amadeus auth failed")) {
+         // Prioritize the configuration error message if it's the root cause
+        if (error.message.includes("Server configuration error:") || error.message.includes("Failed to prepare search: Server configuration error:")) {
+            userMessage = "Server configuration error: API credentials missing or invalid. Please contact support.";
+        } else if (error.message.includes("Failed to get Amadeus token:") || error.message.includes("Amadeus auth failed")) {
              userMessage = `Authentication with the hotel service failed.${error.message.includes('Invalid Credentials') ? ' Check server API credentials.' : ' Please contact support if this persists.'}`;
         } else if (error.message.includes("Search failed:") || // Specific parsed API errors
                    error.message.includes("No hotels found") ||

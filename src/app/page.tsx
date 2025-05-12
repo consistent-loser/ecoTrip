@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -33,9 +34,9 @@ export default function HomePage() {
   const [lastSearchCriteria, setLastSearchCriteria] = useState<HotelSearchCriteria | null>(null);
   const [totalSavings, setTotalSavings] = useState<number>(0);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [isConfigError, setIsConfigError] = useState<boolean>(false); 
-  const [isApiError, setIsApiError] = useState<boolean>(false);
-  const [bookedHotelName, setBookedHotelName] = useState<string>(''); 
+  const [isConfigError, setIsConfigError] = useState<boolean>(false); // State for API key config error
+  const [isApiError, setIsApiError] = useState<boolean>(false); // State for general API/search errors
+  const [bookedHotelName, setBookedHotelName] = useState<string>(''); // To show in success dialog
 
   const { toast } = useToast();
 
@@ -58,6 +59,7 @@ export default function HomePage() {
     setLastSearchCriteria(criteria);
     console.log("Initiating SERVER-SIDE Amadeus search via Server Action...");
 
+    // Basic client-side validation before sending to server
     if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests || criteria.numberOfGuests < 1) {
         setSearchError("Please fill in all search fields accurately.");
         setIsLoading(false);
@@ -70,43 +72,53 @@ export default function HomePage() {
     }
 
     try {
-        const results = await searchHotels(criteria);
+        const results = await searchHotels(criteria); // Call the Server Action
 
-        if (results.length > 0) {
-           setSearchResults(results);
-           console.log(`SERVER ACTION: Found ${results.length} hotels.`);
+        // Check if results is actually an array (it should be)
+        if (Array.isArray(results)) {
+            if (results.length > 0) {
+               setSearchResults(results);
+               console.log(`SERVER ACTION: Found ${results.length} hotels.`);
+            } else {
+               console.log("SERVER ACTION: No hotel data returned (empty array).");
+               // If the server action returns an empty array without throwing an error,
+               // it means the search was successful but found nothing.
+               // This case is handled by the UI block showing "No Hotels Found".
+               setSearchResults([]);
+            }
         } else {
-           console.log("SERVER ACTION: No hotel data returned.");
-           // The server action will throw an error for "no hotels found", which will be caught below.
-           // If it returns empty without error, that's an unexpected case.
-           setSearchError(`No available hotels found matching your criteria in ${criteria.city} for the selected dates. This might be an unexpected issue.`);
-           setSearchResults([]);
+            // This case should ideally not happen if the server action is well-defined
+            console.error("SERVER ACTION Search returned unexpected non-array type:", results);
+            setSearchError("Received unexpected data from the server during search.");
+            setIsApiError(true); // Treat as a general API error
+            setSearchResults([]);
         }
+
 
     } catch (error: any) {
         console.error("SERVER ACTION Search failed:", error);
         const errorMessage = error.message || "An unknown error occurred during search.";
         setSearchError(errorMessage); // Set the specific error message from the server
 
-        if (errorMessage.includes("API credentials missing")) {
+        // Distinguish between configuration errors and other API/search errors
+        if (errorMessage.includes("Server configuration error:") || errorMessage.includes("API credentials missing")) {
             setIsConfigError(true);
-            // The main searchError state will hold the specific message from backend.
-        } else if (errorMessage.includes("Amadeus auth failed") || errorMessage.includes("Search failed:") || errorMessage.includes("No hotels found") || errorMessage.includes("Sorry, we couldn't find any available hotels")) {
-            setIsApiError(true);
-             toast({ // Keep toast for immediate feedback
-                title: "Search Error",
-                description: errorMessage,
+            // Toast for immediate feedback on config issues
+            toast({
+                title: "Configuration Error",
+                description: "The hotel search service is not configured correctly. Please contact support.",
                 variant: "destructive",
             });
         } else {
-            // Other unexpected errors
-             toast({
-                title: "Error",
-                description: "An unexpected error occurred during the search.",
+            // Treat other errors as API/search related errors
+            setIsApiError(true);
+             toast({ // Keep toast for immediate feedback on search problems
+                title: "Search Error",
+                description: errorMessage, // Show the specific error from the backend
                 variant: "destructive",
             });
         }
-        setSearchResults([]);
+        setSearchResults([]); // Clear results on any error
     } finally {
         setIsLoading(false);
         console.log("SERVER ACTION Search finished.");
@@ -114,10 +126,11 @@ export default function HomePage() {
   };
 
   const handleBookNow = (hotel: Hotel) => {
+    // Ensure search criteria (dates/guests) are available from the last search
     if (!lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate || !lastSearchCriteria?.numberOfGuests) {
         toast({
             title: "Missing Booking Info",
-            description: "Please ensure destination, dates, and guests are set before booking.",
+            description: "Please ensure destination, dates, and guests are set from your last search before booking.",
             variant: "destructive",
         });
         return;
@@ -127,28 +140,31 @@ export default function HomePage() {
   };
 
   const handlePaymentSubmit = async (paymentDetails: PaymentDetails) => {
+    // Ensure selected hotel and search criteria are still valid
     if (!selectedHotel || !lastSearchCriteria?.checkInDate || !lastSearchCriteria?.checkOutDate || !lastSearchCriteria?.numberOfGuests) {
         toast({
             title: "Booking Error",
-            description: "Missing booking information.",
+            description: "Missing booking information. Please try searching again.",
             variant: "destructive",
         });
         setShowPaymentDialog(false);
         return;
     }
     setIsBooking(true);
-    const hotelToBook = selectedHotel;
-    setBookedHotelName(hotelToBook.name);
+    const hotelToBook = selectedHotel; // Capture hotel before potentially clearing state
+    setBookedHotelName(hotelToBook.name); // Set name for success dialog
 
     try {
+        // Call the Server Action for simulated booking
         const bookedTrip = await simulateBookHotel(
             hotelToBook,
             lastSearchCriteria.checkInDate,
             lastSearchCriteria.checkOutDate,
             lastSearchCriteria.numberOfGuests,
-            paymentDetails 
+            paymentDetails // Pass payment details for simulation logic
         );
 
+        // Add trip to local storage (Client-side)
         await addTrip(bookedTrip);
 
         setShowPaymentDialog(false);
@@ -157,7 +173,7 @@ export default function HomePage() {
             title: "Booking Successful! (Simulated)",
             description: `${hotelToBook.name} has been booked. Check 'My Trips'.`,
         });
-        setSelectedHotel(null);
+        setSelectedHotel(null); // Clear selected hotel after successful booking
 
     } catch (error: any) {
         console.error("SERVER ACTION Booking simulation failed:", error);
@@ -171,14 +187,17 @@ export default function HomePage() {
     }
   };
 
+  // Calculates total amount based on selected hotel's price (which might be total price)
   const calculateTotalAmount = () => {
     if (!selectedHotel) return 0;
+    // Assuming pricePerNight actually holds the total offer price from search results
     return selectedHotel.pricePerNight;
   };
 
 
   return (
     <div className="container mx-auto py-8 px-4">
+      {/* Hero Section */}
       <section className="text-center mb-12 hero-section py-16 md:py-20 bg-gradient-to-r from-primary/80 via-primary to-accent/70 rounded-lg shadow-xl relative overflow-hidden">
         <div className="absolute inset-0 opacity-20">
             <Image src="https://picsum.photos/seed/travelbg/1200/500" alt="Scenic travel background" layout="fill" objectFit="cover" data-ai-hint="landscape travel" priority />
@@ -194,6 +213,7 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Loading State */}
       {isLoading && (
         <div className="flex flex-col justify-center items-center py-10 text-center">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -202,26 +222,36 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Error Display Area */}
        {!isLoading && searchPerformed && searchError && (
          <div className="text-center py-10">
-          {isConfigError ? ( 
+          {/* Configuration Error Specific Message */}
+          {isConfigError ? (
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
                  <Info className="h-5 w-5 !text-destructive" />
                 <AlertTitle className="font-semibold text-destructive">Server Configuration Error</AlertTitle>
                 <AlertDescription className="text-destructive/90">
-                   {searchError}
-                   <p className="mt-2 text-xs">The server is missing necessary API credentials to connect to the hotel service. Please contact support.</p>
+                   {searchError} {/* Display the specific error from the server */}
+                   <p className="mt-2 text-xs">The server is missing necessary API credentials or they are invalid. Please contact support.</p>
                 </AlertDescription>
             </Alert>
-          ) : isApiError ? ( 
+          ) : /* API/Search Error Specific Message */
+          isApiError ? (
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
                  <AlertTriangle className="h-5 w-5 !text-destructive" />
                 <AlertTitle className="font-semibold text-destructive">Search Problem</AlertTitle>
                 <AlertDescription className="text-destructive/90">
                    {searchError} {/* Display the specific error from the server */}
+                   <p className="mt-2 text-xs">There was an issue communicating with the hotel search service. Please check your search criteria or try again later.</p>
                 </AlertDescription>
+                 {/* Retry Button for API errors */}
+                 {lastSearchCriteria && (
+                    <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-6" variant="secondary">
+                        <RefreshCcw className="mr-2 h-4 w-4"/> Retry Search
+                    </Button>
+                )}
             </Alert>
-           ): ( 
+           ): /* Generic Fallback Error (should be less common now) */ (
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
@@ -237,11 +267,13 @@ export default function HomePage() {
       )}
 
 
+      {/* No Results Found */}
       {!isLoading && searchPerformed && !searchError && searchResults.length === 0 && (
          <div className="text-center py-10">
           <SearchX className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
           <h3 className="text-2xl font-semibold mb-2">No Hotels Found</h3>
           <p className="text-muted-foreground max-w-md mx-auto">We couldn't find any available hotels matching your criteria via Amadeus. Try adjusting your dates, destination, or check the spelling.</p>
+           {/* Allow retry even if no results found */}
            {lastSearchCriteria && (
                 <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-6" variant="outline">
                     <RefreshCcw className="mr-2 h-4 w-4"/> Retry Search
@@ -250,6 +282,7 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Search Results Display */}
       {!isLoading && !searchError && searchResults.length > 0 && (
         <section>
           <h2 className="text-3xl font-semibold mb-8 text-center">
@@ -263,6 +296,7 @@ export default function HomePage() {
         </section>
       )}
 
+      {/* Initial State / Why Choose Us Section */}
       {!isLoading && !searchPerformed && !searchError && (
          <section className="py-16">
             <div className="text-center mb-12">
@@ -273,6 +307,7 @@ export default function HomePage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-16">
+                {/* Eco Rebooking Card */}
                 <div className="flex flex-col items-center md:items-start">
                     <div className="mb-6 w-full max-w-md">
                         <Image src="https://picsum.photos/seed/rebook/600/400" alt="Piggy bank symbolizing savings" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="savings money" />
@@ -283,6 +318,7 @@ export default function HomePage() {
                         <p className="text-muted-foreground leading-relaxed mb-4">
                             Book with confidence! If the price of your booked hotel drops for the same room and dates, we'll automatically rebook it for you at the lower price. Saving money on your sustainable stays has never been easier. (Feature coming soon!)
                         </p>
+                        {/* Savings Meter */}
                         <div className="mt-6 bg-primary/10 p-6 rounded-lg shadow-md">
                             <div className="flex items-center justify-center md:justify-start text-primary mb-2">
                                 <PiggyBank className="h-10 w-10 mr-3" />
@@ -297,6 +333,7 @@ export default function HomePage() {
                     </div>
                 </div>
 
+                {/* Travel Green Card */}
                 <div className="flex flex-col items-center md:items-start">
                     <div className="mb-6 w-full max-w-md">
                         <Image src="https://picsum.photos/seed/ecohotel/600/400" alt="Hotel building with green leaves overlay" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="eco hotel" />
@@ -319,9 +356,11 @@ export default function HomePage() {
       )}
 
 
+      {/* Payment Dialog */}
       {selectedHotel && (
         <Dialog open={showPaymentDialog} onOpenChange={(isOpen) => {
             setShowPaymentDialog(isOpen);
+            // Clear selected hotel if dialog is closed without booking
             if (!isOpen) setSelectedHotel(null);
             }}>
           <DialogContent className="sm:max-w-[480px]">
@@ -342,6 +381,7 @@ export default function HomePage() {
         </Dialog>
       )}
 
+      {/* Booking Success Dialog */}
       <Dialog open={showBookingSuccessDialog} onOpenChange={setShowBookingSuccessDialog}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
