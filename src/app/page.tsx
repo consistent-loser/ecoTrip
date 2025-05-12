@@ -18,7 +18,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash } from 'lucide-react'; // Added ServerCrash
+import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash, Info } from 'lucide-react'; // Added Info for config error
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
@@ -33,6 +33,7 @@ export default function HomePage() {
   const [lastSearchCriteria, setLastSearchCriteria] = useState<HotelSearchCriteria | null>(null);
   const [totalSavings, setTotalSavings] = useState<number>(0);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isConfigError, setIsConfigError] = useState<boolean>(false); // State for API key config error
 
   const { toast } = useToast();
 
@@ -47,27 +48,31 @@ export default function HomePage() {
     setSearchPerformed(true);
     setSearchResults([]); // Clear previous results
     setSearchError(null); // Clear previous errors
+    setIsConfigError(false); // Reset config error state
     setLastSearchCriteria(criteria);
     try {
-      // Basic validation before API call
-      if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate) {
-          throw new Error("Please provide a destination city, check-in date, and check-out date.");
-      }
+      // Basic validation moved to searchHotels service
       const results = await searchHotels(criteria);
       setSearchResults(results);
       if (results.length === 0) {
           console.log("Search returned no results for:", criteria);
-          // No need to set an error message here, the UI will handle empty results display
+          // UI will handle empty results display
       }
     } catch (error: any) {
       console.error("Search failed:", error);
-      const errorMessage = error.message || "Could not fetch hotel results. Please check your connection or search criteria and try again.";
+      const errorMessage = error.message || "An unknown error occurred during search.";
       setSearchError(errorMessage);
-      toast({
-        title: "Search Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+
+      // Check if it's the specific configuration error
+      if (errorMessage.includes("Amadeus API Key/Secret not configured")) {
+          setIsConfigError(true);
+      } else {
+         toast({
+            title: "Search Error",
+            description: errorMessage,
+            variant: "destructive",
+         });
+      }
       setSearchResults([]);
     }
     setIsLoading(false);
@@ -141,7 +146,6 @@ export default function HomePage() {
   const calculateTotalAmount = () => {
     if (!selectedHotel) return 0;
     // Amadeus /v2/shopping/hotel-offers often returns the TOTAL price for the stay in `pricePerNight` field after transformation.
-    // If pricePerNight truly represents per night, the old calculation is fine.
     // Let's assume pricePerNight IS the total price from the offer for now.
     return selectedHotel.pricePerNight;
 
@@ -181,12 +185,24 @@ export default function HomePage() {
       {/* Error State */}
        {!isLoading && searchPerformed && searchError && (
          <div className="text-center py-10">
-          <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
-          <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
-          <p className="text-muted-foreground max-w-md mx-auto">{searchError}</p>
-           <Button onClick={() => lastSearchCriteria && handleSearch(lastSearchCriteria)} className="mt-4">
-              Retry Search
-            </Button>
+          {isConfigError ? (
+             <>
+                <Info className="h-16 w-16 mx-auto text-destructive mb-4" />
+                <h3 className="text-2xl font-semibold mb-2 text-destructive">API Configuration Error</h3>
+                <p className="text-muted-foreground max-w-md mx-auto">The hotel search feature is not properly configured. Please contact the site administrator or check the developer console for details.</p>
+             </>
+          ) : (
+             <>
+                <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
+                <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
+                <p className="text-muted-foreground max-w-md mx-auto">{searchError}</p>
+                {lastSearchCriteria && (
+                    <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-4">
+                        Retry Search
+                    </Button>
+                )}
+             </>
+          )}
         </div>
       )}
 

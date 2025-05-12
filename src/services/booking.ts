@@ -1,4 +1,5 @@
 
+
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
 
 // --- Amadeus API Configuration ---
@@ -37,6 +38,7 @@ async function getAmadeusAccessToken(): Promise<string> {
   // Check specifically for the placeholder values if environment variables weren't set
   if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
       console.warn("Using placeholder Amadeus API Key/Secret. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables for proper functionality.");
+      // Allow fetching token even with placeholders for testing basic connectivity, but auth will likely fail.
   }
 
 
@@ -196,11 +198,12 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
   console.log("Searching Amadeus hotels with criteria:", criteria);
 
-   // Check if API keys are actually missing or empty before attempting to get token
+   // Check if API keys are actually missing or empty or placeholders before proceeding
    if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-       console.error("Amadeus API Key/Secret not configured or using placeholder values. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.");
-       // Return empty to indicate configuration issue that prevents auth
-       return [];
+       const errorMessage = "Amadeus API Key/Secret not configured or using placeholder values. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.";
+       console.error(errorMessage);
+       // Throw an error so the UI can catch it and display an appropriate message
+       throw new Error(errorMessage);
    }
 
 
@@ -208,11 +211,13 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
   if (!city) {
     console.warn("No city provided for Amadeus search.");
-    return [];
+    // Throw error instead of returning empty array
+    throw new Error("Please provide a destination city for the search.");
   }
   if (!checkInDate || !checkOutDate) {
       console.warn("Check-in and Check-out dates are required for Amadeus search.");
-      return [];
+      // Throw error instead of returning empty array
+      throw new Error("Please provide both check-in and check-out dates for the search.");
   }
 
   try {
@@ -267,7 +272,12 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
            // Log the first detailed error message
            const firstError = errorJson.errors[0];
            console.error(`Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
-           apiErrorMessage = `Amadeus API Error: ${firstError.title} (Code: ${firstError.code})`;
+           // Use a more user-friendly message if possible
+           if (firstError.code === 38196) { // Example: Invalid date format or range
+                apiErrorMessage = `Search failed: ${firstError.title}. Please check your dates.`;
+           } else {
+                apiErrorMessage = `Search failed: ${firstError.title} (Code: ${firstError.code})`;
+           }
          }
        } catch (parseError) {
           console.warn("Could not parse Amadeus search error response JSON.");
@@ -294,7 +304,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     console.error("Error during hotel search process:", error);
     // Propagate the error message to the UI
     if (error instanceof Error) {
-        throw error; // Re-throw the caught error (could be auth error or other)
+        throw error; // Re-throw the caught error (could be auth error, config error, or other)
     } else {
         throw new Error("An unknown error occurred during hotel search.");
     }
