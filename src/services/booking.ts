@@ -52,8 +52,24 @@ async function getAmadeusAccessToken(): Promise<string> {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Amadeus Auth Error Response:", errorBody);
-      throw new Error(`Amadeus auth failed: ${response.status} ${response.statusText}`);
+      console.error("Amadeus Auth Error Response Body:", errorBody); // Log the raw error body
+
+      let errorMessage = `Amadeus auth failed: ${response.status} ${response.statusText}`;
+       // Try to parse for more specific feedback, especially "invalid_client"
+      try {
+         const errorJson = JSON.parse(errorBody);
+         if (errorJson.error === 'invalid_client') {
+            errorMessage = `Amadeus auth failed: Invalid API Key or Secret. Please verify your credentials in environment variables. (Code: ${errorJson.code || 'N/A'})`;
+            console.error(">>> Specific Error: Invalid Amadeus Client Credentials <<<");
+         } else if (errorJson.title) {
+             errorMessage = `Amadeus auth failed: ${errorJson.title} (Code: ${errorJson.code || 'N/A'})`;
+         }
+      } catch (parseError) {
+        // Ignore parsing error, use the generic message
+        console.warn("Could not parse Amadeus auth error response JSON.");
+      }
+
+      throw new Error(errorMessage);
     }
 
     const tokenData: AmadeusAccessToken = await response.json();
@@ -66,7 +82,8 @@ async function getAmadeusAccessToken(): Promise<string> {
     console.error("Error fetching Amadeus access token:", error);
     accessToken = null; // Invalidate token on error
     tokenExpiryTime = null;
-    throw error; // Re-throw error to be handled by the caller
+    // Re-throw the potentially more specific error message caught above
+    throw error;
   }
 }
 
@@ -91,7 +108,19 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
     if (!response.ok) {
        const errorBody = await response.text();
        console.error("Amadeus City Lookup Error Response:", errorBody);
-      throw new Error(`Amadeus city lookup failed: ${response.status} ${response.statusText}`);
+       // Try to parse the error for more specific feedback
+       try {
+         const errorJson = JSON.parse(errorBody);
+         if (errorJson.errors && errorJson.errors.length > 0) {
+           const firstError = errorJson.errors[0];
+           console.error(`Amadeus City Lookup API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
+           // Don't throw here, just log and return null
+         }
+       } catch (parseError) {
+         // Ignore parsing error
+       }
+      console.error(`Amadeus city lookup failed: ${response.status} ${response.statusText}`);
+      return null; // Indicate failure to find code
     }
 
     const data = await response.json();
@@ -99,7 +128,9 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
     if (data && data.data && data.data.length > 0) {
       // Prioritize exact matches or cities over airports if possible
       const city = data.data.find((loc: any) => loc.name.toLowerCase() === cityName.toLowerCase() && loc.subType === 'CITY');
-      return city ? city.iataCode : data.data[0].iataCode; // Fallback to first result if no exact city match
+      const code = city ? city.iataCode : data.data[0].iataCode; // Fallback to first result if no exact city match
+      console.log(`Found city code for ${cityName}: ${code}`);
+      return code;
     } else {
       console.warn(`No city code found for: ${cityName}`);
       return null;
@@ -122,7 +153,7 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 
   // Placeholder image logic - Amadeus Hotel Offers API may not provide images directly.
   // You might need another API call (e.g., Hotel Details) or use a generic image.
-  const imageUrl = `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
+  const imageUrl = hotelData.media?.[0]?.uri || `https://picsum.photos/seed/${hotelData.hotelId || Math.random()}/400/300`;
 
   // Address construction - might need refinement based on actual API response structure
   const addressParts = [hotelData.address?.lines?.[0], hotelData.address?.cityName, hotelData.address?.postalCode, hotelData.address?.countryCode];
@@ -141,13 +172,15 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
     name: hotelData.name || 'Hotel Name Unavailable',
     address: address || 'Address Unavailable',
     city: hotelData.address?.cityName || 'City Unavailable',
-    pricePerNight: offerPrice?.total ? parseFloat(offerPrice.total) : 0, // Price might be per stay, adjust logic if needed
+    // Price might be per stay, adjust logic if needed. Safely parse float.
+    pricePerNight: offerPrice?.total ? parseFloat(offerPrice.total) : 0,
     imageUrl: imageUrl,
-    rating: rating > 0 && rating <= 5 ? rating : (Math.random() * 2 + 3).toFixed(1), // Use rating if valid, else random fallback
+    // Use rating if valid (1-5), else provide a random fallback or 0/null
+    rating: rating > 0 && rating <= 5 ? rating : (Math.random() * 1.5 + 3).toFixed(1), // Random 3.0-4.5 fallback
     amenities: amenities.slice(0, 6), // Limit displayed amenities
     latitude: hotelData.latitude,
     longitude: hotelData.longitude,
-    description: `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`, // Generic description
+    description: hotelData.description?.text || `Eco-friendly stay at ${hotelData.name || 'this hotel'} in ${hotelData.address?.cityName || 'the city'}. Check availability for details.`, // Use description if available
     currency: offerPrice?.currency || 'USD',
   };
 }
@@ -163,15 +196,11 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
   console.log("Searching Amadeus hotels with criteria:", criteria);
 
-   // Check if API keys are actually missing or empty
-   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-       console.error("Amadeus API Key/Secret not configured or missing. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.");
-       // Return empty to indicate configuration issue
+   // Check if API keys are actually missing or empty before attempting to get token
+   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+       console.error("Amadeus API Key/Secret not configured or using placeholder values. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.");
+       // Return empty to indicate configuration issue that prevents auth
        return [];
-   }
-   // Warn if using placeholder keys (but don't error out)
-   if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-       console.warn("Using placeholder Amadeus API credentials. Search might fail or return limited results. Set environment variables for proper function.");
    }
 
 
@@ -187,12 +216,15 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
   }
 
   try {
+    // Get token will throw if auth fails
     const token = await getAmadeusAccessToken();
     const cityCode = await getCityCode(city, token);
 
     if (!cityCode) {
       console.warn(`Could not find IATA city code for ${city}. Cannot search Amadeus.`);
-      return [];
+      // Optionally inform the user via toast or error state
+      throw new Error(`Could not find location code for "${city}". Please try a different city name.`);
+      // return []; // Or return empty
     }
 
     const params = new URLSearchParams({
@@ -215,6 +247,8 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       bestRateOnly: 'true',
     });
 
+    console.log(`Amadeus Search URL: ${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`);
+
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`, {
       method: 'GET',
       headers: {
@@ -224,20 +258,21 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Amadeus Hotel Search Error Response:", errorBody);
+      console.error("Amadeus Hotel Search Error Response Body:", errorBody);
        // Try to parse the error for more specific feedback
+       let apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}`;
        try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.errors && errorJson.errors.length > 0) {
            // Log the first detailed error message
            const firstError = errorJson.errors[0];
            console.error(`Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
-           throw new Error(`Amadeus API Error: ${firstError.title} (Code: ${firstError.code})`);
+           apiErrorMessage = `Amadeus API Error: ${firstError.title} (Code: ${firstError.code})`;
          }
        } catch (parseError) {
-         // Ignore parsing error, fall back to generic message
+          console.warn("Could not parse Amadeus search error response JSON.");
        }
-      throw new Error(`Amadeus hotel search failed: ${response.status} ${response.statusText}`);
+      throw new Error(apiErrorMessage);
     }
 
     const data = await response.json();
@@ -246,6 +281,9 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
        console.log(`Found ${data.data.length} hotel offers from Amadeus.`);
        // Filter out offers that might be missing essential info like price or hotel details
        const validOffers = data.data.filter((offer: AmadeusHotelOffer) => offer.hotel && offer.offers?.[0]?.price?.total);
+        if (validOffers.length < data.data.length) {
+            console.warn(`Filtered out ${data.data.length - validOffers.length} offers due to missing hotel or price information.`);
+        }
        return validOffers.map(transformAmadeusHotelOffer);
     } else {
       console.warn("No results from Amadeus API or unexpected format:", data);
@@ -254,10 +292,9 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
   } catch (error) {
     console.error("Error during hotel search process:", error);
-    // Depending on the error (e.g., auth vs. network), you might handle differently.
     // Propagate the error message to the UI
     if (error instanceof Error) {
-        throw error; // Re-throw the caught error
+        throw error; // Re-throw the caught error (could be auth error or other)
     } else {
         throw new Error("An unknown error occurred during hotel search.");
     }
@@ -281,7 +318,7 @@ export async function simulateBookHotel(
 
   // TODO: In a real application, this would involve:
   // 1. Re-fetching the specific offer price (Hotel Offers Pricing API: /v1/shopping/hotel-offers/pricing)
-  //    Requires the `offerId` from the search results.
+  //    Requires the `offerId` from the search results (needs to be added to transformAmadeusHotelOffer and Hotel type).
   // 2. Creating the booking (Hotel Booking API: /v1/booking/hotel-bookings)
   //    This requires handling traveler information, payment details (securely!), and API responses.
 
@@ -290,12 +327,11 @@ export async function simulateBookHotel(
   // Calculate total price. NOTE: The `hotel.pricePerNight` from the search result
   // often represents the TOTAL price for the stay duration searched.
   // Verify this based on Amadeus API docs for `/v2/shopping/hotel-offers`.
-  // If it's total, use it directly. If it's truly per night, calculate as below.
   // Assuming pricePerNight IS the total price for the stay:
   const totalPrice = hotel.pricePerNight;
 
   // If pricePerNight was confirmed to be *per night*:
-  // const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
+  // const nights = Math.max(1, Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)));
   // const totalPrice = hotel.pricePerNight * nights;
 
   const newTrip: Trip = {
@@ -355,6 +391,43 @@ export async function addTrip(trip: Trip): Promise<void> {
         localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
     } catch (error) {
         console.error("Failed to save trip to localStorage:", error);
+        // Consider adding user feedback here (e.g., toast notification)
+    }
+  }
+}
+
+/**
+ * Removes a trip from localStorage by ID.
+ */
+export async function removeTrip(tripId: string): Promise<void> {
+  // Ensure this runs only on the client-side
+  if (typeof window !== 'undefined') {
+    try {
+      let existingTrips = await getTrips();
+      const updatedTrips = existingTrips.filter(trip => trip.id !== tripId);
+      localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
+    } catch (error) {
+      console.error("Failed to remove trip from localStorage:", error);
+      // Consider user feedback
+    }
+  }
+}
+
+/**
+ * Updates a trip in localStorage (e.g., changing status).
+ */
+export async function updateTrip(updatedTrip: Trip): Promise<void> {
+  // Ensure this runs only on the client-side
+  if (typeof window !== 'undefined') {
+    try {
+      let existingTrips = await getTrips();
+      const updatedTrips = existingTrips.map(trip =>
+        trip.id === updatedTrip.id ? updatedTrip : trip
+      );
+      localStorage.setItem('ecoTrips', JSON.stringify(updatedTrips));
+    } catch (error) {
+      console.error("Failed to update trip in localStorage:", error);
+      // Consider user feedback
     }
   }
 }
