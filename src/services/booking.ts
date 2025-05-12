@@ -4,10 +4,12 @@ import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffe
 // --- Amadeus API Configuration ---
 // IMPORTANT: In a real application, NEVER hardcode API keys. Use environment variables.
 // Example .env.local:
-// AMADEUS_API_KEY=jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret
-// AMADEUS_API_SECRET=U1MGYukFmZhrjq40
-const AMADEUS_API_KEY = process.env.NEXT_PUBLIC_AMADEUS_API_KEY || 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret'; // Replace with process.env.AMADEUS_API_KEY on server
-const AMADEUS_API_SECRET = process.env.NEXT_PUBLIC_AMADEUS_API_SECRET || 'U1MGYukFmZhrjq40'; // Replace with process.env.AMADEUS_API_SECRET on server
+// NEXT_PUBLIC_AMADEUS_API_KEY=YourApiKey
+// NEXT_PUBLIC_AMADEUS_API_SECRET=YourApiSecret
+// Note: Exposing secrets (like API Secret) with NEXT_PUBLIC_ is insecure for production.
+// Ideally, API calls requiring secrets should happen server-side (API route or Server Action).
+const AMADEUS_API_KEY = process.env.NEXT_PUBLIC_AMADEUS_API_KEY || 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret';
+const AMADEUS_API_SECRET = process.env.NEXT_PUBLIC_AMADEUS_API_SECRET || 'U1MGYukFmZhrjq40';
 const AMADEUS_API_BASE_URL = 'https://test.api.amadeus.com'; // Use https://api.amadeus.com for production
 
 // --- Amadeus Authentication ---
@@ -25,6 +27,18 @@ async function getAmadeusAccessToken(): Promise<string> {
     // console.log("Using cached Amadeus token");
     return accessToken.access_token;
   }
+
+  // Check if keys are available before attempting to fetch token
+  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+      const message = "Amadeus API Key/Secret not configured. Cannot authenticate.";
+      console.error(message);
+      throw new Error(message);
+  }
+  // Check specifically for the placeholder values if environment variables weren't set
+  if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+      console.warn("Using placeholder Amadeus API Key/Secret. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables for proper functionality.");
+  }
+
 
   console.log("Fetching new Amadeus token...");
   try {
@@ -149,14 +163,16 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
   console.log("Searching Amadeus hotels with criteria:", criteria);
 
-  // Check if API keys are placeholder values
-  if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || !AMADEUS_API_KEY || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40' || !AMADEUS_API_SECRET) {
-      console.error("Amadeus API Key/Secret not configured. Please set AMADEUS_API_KEY and AMADEUS_API_SECRET environment variables.");
-      // Optionally, you could throw an error or return mock data here.
-      // For now, returning empty to indicate configuration issue.
-      // alert("Amadeus API is not configured correctly."); // Alerting might be too intrusive
-      return [];
-  }
+   // Check if API keys are actually missing or empty
+   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+       console.error("Amadeus API Key/Secret not configured or missing. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.");
+       // Return empty to indicate configuration issue
+       return [];
+   }
+   // Warn if using placeholder keys (but don't error out)
+   if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
+       console.warn("Using placeholder Amadeus API credentials. Search might fail or return limited results. Set environment variables for proper function.");
+   }
 
 
   const { city, checkInDate, checkOutDate, numberOfGuests } = criteria;
@@ -209,6 +225,18 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     if (!response.ok) {
       const errorBody = await response.text();
       console.error("Amadeus Hotel Search Error Response:", errorBody);
+       // Try to parse the error for more specific feedback
+       try {
+         const errorJson = JSON.parse(errorBody);
+         if (errorJson.errors && errorJson.errors.length > 0) {
+           // Log the first detailed error message
+           const firstError = errorJson.errors[0];
+           console.error(`Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
+           throw new Error(`Amadeus API Error: ${firstError.title} (Code: ${firstError.code})`);
+         }
+       } catch (parseError) {
+         // Ignore parsing error, fall back to generic message
+       }
       throw new Error(`Amadeus hotel search failed: ${response.status} ${response.statusText}`);
     }
 
@@ -225,10 +253,14 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     }
 
   } catch (error) {
-    console.error("Error fetching hotels from Amadeus API:", error);
+    console.error("Error during hotel search process:", error);
     // Depending on the error (e.g., auth vs. network), you might handle differently.
-    // Returning empty array on error.
-    return [];
+    // Propagate the error message to the UI
+    if (error instanceof Error) {
+        throw error; // Re-throw the caught error
+    } else {
+        throw new Error("An unknown error occurred during hotel search.");
+    }
   }
 }
 
@@ -249,15 +281,22 @@ export async function simulateBookHotel(
 
   // TODO: In a real application, this would involve:
   // 1. Re-fetching the specific offer price (Hotel Offers Pricing API: /v1/shopping/hotel-offers/pricing)
+  //    Requires the `offerId` from the search results.
   // 2. Creating the booking (Hotel Booking API: /v1/booking/hotel-bookings)
-  // This requires handling traveler information, payment details (securely!), and API responses.
+  //    This requires handling traveler information, payment details (securely!), and API responses.
 
   await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay for booking
 
-  // Calculate total price based on fetched pricePerNight (which might be per stay from Amadeus, adjust if needed)
-  // If pricePerNight from transform is actually total price, use that directly. Let's assume it's per night for now.
-  const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
-  const totalPrice = hotel.pricePerNight * nights; // Adjust calculation if pricePerNight represents total stay price
+  // Calculate total price. NOTE: The `hotel.pricePerNight` from the search result
+  // often represents the TOTAL price for the stay duration searched.
+  // Verify this based on Amadeus API docs for `/v2/shopping/hotel-offers`.
+  // If it's total, use it directly. If it's truly per night, calculate as below.
+  // Assuming pricePerNight IS the total price for the stay:
+  const totalPrice = hotel.pricePerNight;
+
+  // If pricePerNight was confirmed to be *per night*:
+  // const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24)) || 1;
+  // const totalPrice = hotel.pricePerNight * nights;
 
   const newTrip: Trip = {
     id: `trip-amadeus-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
