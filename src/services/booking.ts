@@ -52,7 +52,7 @@ export function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
     city: hotelData.address?.cityName || 'City Unavailable',
     pricePerNight: offerPrice?.total ? parseFloat(offerPrice.total) : 0,
     imageUrl: imageUrl,
-    rating: rating > 0 && rating <= 5 ? rating : (Math.random() * 1.5 + 3).toFixed(1),
+    rating: rating > 0 && rating <= 5 ? rating : parseFloat((Math.random() * 1.5 + 3).toFixed(1)), // Ensure number
     amenities: amenities.slice(0, 6),
     latitude: hotelData.latitude,
     longitude: hotelData.longitude,
@@ -192,7 +192,7 @@ export async function updateTrip(updatedTrip: Trip): Promise<void> {
 // --- Client-Side Amadeus API Constants (defined again for clarity) ---
 // WARNING: Exposing secrets on the client is a major security risk.
 export const CLIENT_AMADEUS_CONFIG = {
-  apiKey: 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9',
-  apiSecret: 'U1MGYukFmZhrjq40',
-  baseUrl: 'https://test.api.amadeus.com'
+  apiKey: AMADEUS_API_KEY_CLIENT,
+  apiSecret: AMADEUS_API_SECRET_CLIENT,
+  baseUrl: AMADEUS_API_BASE_URL_CLIENT
 };

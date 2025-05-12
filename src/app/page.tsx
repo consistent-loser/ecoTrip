@@ -19,23 +19,26 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash, Info, ShieldAlert } from 'lucide-react';
+import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash, Info, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
 // --- Client-Side Amadeus API Functions ---
 // WARNING: Including secrets directly in client-side code is INSECURE.
 // These functions replicate the server-side logic but run in the browser.
+// CORS errors are likely when calling APIs directly from the browser this way.
 
 async function getAmadeusAccessToken_Client(): Promise<string> {
     const { apiKey, apiSecret, baseUrl } = CLIENT_AMADEUS_CONFIG;
     const url = `${baseUrl}/v1/security/oauth2/token`;
 
     if (!apiKey || !apiSecret) {
-        throw new Error("CLIENT_ERROR: Amadeus API Key/Secret missing in config.");
+        // This error should ideally be caught before calling, but double-check
+        throw new Error("CLIENT_ERROR: Amadeus API Key/Secret missing in config. Cannot authenticate.");
     }
 
     try {
+        console.log("CLIENT: Attempting to fetch Amadeus token from:", url);
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -43,7 +46,11 @@ async function getAmadeusAccessToken_Client(): Promise<string> {
             },
             body: `grant_type=client_credentials&client_id=${apiKey}&client_secret=${apiSecret}`,
             // Client-side fetch doesn't need cache: 'no-store' in the same way server does
+            // 'mode: "no-cors"' might hide the error but won't make the request succeed if CORS is enforced server-side.
+            // mode: 'no-cors', // Avoid using no-cors unless you understand the implications. It often masks the real issue.
         });
+        console.log("CLIENT: Amadeus token response status:", response.status);
+
 
         if (!response.ok) {
             const errorBody = await response.text();
@@ -52,11 +59,15 @@ async function getAmadeusAccessToken_Client(): Promise<string> {
             try {
                 const errorJson = JSON.parse(errorBody);
                  if (errorJson.error === 'invalid_client') {
-                    errorMessage = `CLIENT Amadeus auth failed: Invalid API Key or Secret provided. (Code: ${errorJson.code || 'N/A'})`;
+                    errorMessage = `CLIENT Amadeus auth failed: Invalid API Key or Secret provided. Check configuration. (Code: ${errorJson.code || 'N/A'})`;
                  } else if (errorJson.title) {
                      errorMessage = `CLIENT Amadeus auth failed: ${errorJson.title} (Code: ${errorJson.code || 'N/A'})`;
                  }
-            } catch (parseError) { /* ignore */ }
+            } catch (parseError) { /* ignore JSON parse error, use status text */ }
+            // Check for specific network/CORS related errors if possible (often vague)
+            if (response.status === 0 || !response.status) { // Status 0 often indicates CORS or network error
+                errorMessage = "CLIENT Network/CORS error during Amadeus authentication. Check browser console and network tab. Ensure the API endpoint allows requests from this origin (it likely doesn't for client-side calls).";
+            }
             throw new Error(errorMessage);
         }
 
@@ -64,6 +75,10 @@ async function getAmadeusAccessToken_Client(): Promise<string> {
         return tokenData.access_token;
     } catch (error: any) {
         console.error("CLIENT Error fetching Amadeus access token:", error);
+        // Rethrow a more specific error if possible
+        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+             throw new Error(`CLIENT Network error or CORS issue fetching Amadeus token. API endpoint ${url} might be unreachable or blocking requests from the browser. ${error.message}`);
+        }
         throw new Error(`CLIENT Failed to get Amadeus token: ${error.message}`);
     }
 }
@@ -71,6 +86,7 @@ async function getAmadeusAccessToken_Client(): Promise<string> {
 async function getCityCode_Client(cityName: string, token: string): Promise<string | null> {
     const { baseUrl } = CLIENT_AMADEUS_CONFIG;
     const url = `${baseUrl}/v1/reference-data/locations?subType=CITY&keyword=${encodeURIComponent(cityName)}`;
+    console.log("CLIENT: Attempting to fetch city code from:", url);
 
     try {
         const response = await fetch(url, {
@@ -78,26 +94,52 @@ async function getCityCode_Client(cityName: string, token: string): Promise<stri
             headers: {
                 'Authorization': `Bearer ${token}`,
             },
+            // mode: 'cors', // Default, but explicitly stating
         });
+        console.log("CLIENT: Amadeus city code response status:", response.status);
 
         if (!response.ok) {
             const errorBody = await response.text();
             console.error(`CLIENT Amadeus City Lookup Error (Status ${response.status}):`, errorBody);
-            return null; // Don't throw, allow search to handle gracefully
+             if (response.status === 0 || !response.status) { // CORS or network error
+                console.error("CLIENT Network/CORS error during city code lookup.");
+             }
+            // Don't throw an error that stops the search, just return null and let the main search handle it.
+            return null;
         }
 
         const data = await response.json();
         if (data?.data?.length > 0) {
-            const cityMatch = data.data.find((loc: any) => loc.subType === 'CITY' && loc.iataCode);
-            if (cityMatch) return cityMatch.iataCode;
-            // Fallback to first result with code
-            if (data.data[0].iataCode) return data.data[0].iataCode;
+            // Prioritize exact city matches with IATA codes
+            const cityMatch = data.data.find((loc: any) =>
+                loc.subType === 'CITY' &&
+                loc.iataCode &&
+                loc.name?.toUpperCase() === cityName.toUpperCase()
+            );
+            if (cityMatch) {
+                console.log(`CLIENT: Found exact city match ${cityMatch.iataCode} for ${cityName}`);
+                return cityMatch.iataCode;
+            }
+             // Fallback: Find first CITY type with an IATA code
+            const firstCityWithCode = data.data.find((loc: any) => loc.subType === 'CITY' && loc.iataCode);
+             if (firstCityWithCode) {
+                 console.log(`CLIENT: Found fallback city code ${firstCityWithCode.iataCode} for ${cityName}`);
+                 return firstCityWithCode.iataCode;
+             }
+            // Fallback: Find first result with an IATA code (less ideal)
+            if (data.data[0].iataCode) {
+                console.log(`CLIENT: Found fallback non-city code ${data.data[0].iataCode} for ${cityName}`);
+                return data.data[0].iataCode;
+            }
         }
-        console.warn(`CLIENT No city code found for: ${cityName}`);
+        console.warn(`CLIENT No usable city code found for: ${cityName}`);
         return null;
     } catch (error: any) {
         console.error(`CLIENT Error fetching city code for ${cityName}:`, error);
-        return null; // Don't throw
+         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+             console.error(`CLIENT Network error or CORS issue fetching city code for ${cityName}. API endpoint might be unreachable or blocking requests.`);
+        }
+        return null; // Don't throw, allow search to handle gracefully
     }
 }
 
@@ -114,13 +156,13 @@ export default function HomePage() {
   const [totalSavings, setTotalSavings] = useState<number>(0);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isConfigError, setIsConfigError] = useState<boolean>(false); // State for API key config error
+  const [isCorsError, setIsCorsError] = useState<boolean>(false); // State for CORS/Network error
   const [bookedHotelName, setBookedHotelName] = useState<string>(''); // To show in success dialog
 
   const { toast } = useToast();
 
   useEffect(() => {
     // Simulating fetching savings data - replace with actual logic if available
-    // For now, just set a mock value after a delay
     const timer = setTimeout(() => {
       setTotalSavings(1234.56);
     }, 500); // Simulate network delay
@@ -134,10 +176,11 @@ export default function HomePage() {
     setSearchResults([]);
     setSearchError(null);
     setIsConfigError(false);
+    setIsCorsError(false); // Reset CORS error state
     setLastSearchCriteria(criteria);
-    console.log("Initiating CLIENT-SIDE search...");
+    console.log("Initiating CLIENT-SIDE Amadeus search...");
 
-    // --- Client-Side Validation (Basic) ---
+    // --- Client-Side Validation ---
     if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests || criteria.numberOfGuests < 1) {
         setSearchError("Please fill in all search fields accurately.");
         setIsLoading(false);
@@ -148,6 +191,14 @@ export default function HomePage() {
         setIsLoading(false);
         return;
     }
+
+    // --- Check for API Keys BEFORE making calls ---
+     if (!CLIENT_AMADEUS_CONFIG.apiKey || !CLIENT_AMADEUS_CONFIG.apiSecret) {
+         setSearchError("CLIENT ERROR: Amadeus API Key/Secret missing in configuration. Search unavailable.");
+         setIsConfigError(true);
+         setIsLoading(false);
+         return;
+     }
     // ---
 
     let token: string | null = null;
@@ -163,38 +214,56 @@ export default function HomePage() {
         console.log(`CLIENT: Getting City Code for ${criteria.city}...`);
         cityCode = await getCityCode_Client(criteria.city, token);
          if (!cityCode) {
-            throw new Error(`Could not find location code for "${criteria.city}". Please try a different city name or spelling.`);
-        }
-        console.log(`CLIENT: Using City Code ${cityCode}.`);
+            // Don't throw fatal error, allow search to proceed (Amadeus might handle city name)
+            // but inform user the code wasn't found. City name will be used instead.
+            toast({
+                title: "Location Warning",
+                description: `Could not find a specific location code for "${criteria.city}". Searching by name. Results might be less accurate.`,
+                variant: "default", // Use default or a custom 'warning' variant if available
+            });
+            console.warn(`CLIENT: No city code found for ${criteria.city}. Proceeding with city name.`);
+             // Proceed without cityCode, Amadeus *might* handle the city name directly in some cases,
+             // but it's less reliable than using cityCode. The API call below needs adjustment.
+            // ** IMPORTANT: The search URL needs to handle missing cityCode **
+         } else {
+            console.log(`CLIENT: Using City Code ${cityCode}.`);
+         }
 
 
         // 3. Perform Hotel Search (Client-Side)
         const checkInFormatted = criteria.checkInDate.toISOString().split('T')[0];
         const checkOutFormatted = criteria.checkOutDate.toISOString().split('T')[0];
 
-        const params = new URLSearchParams({
-            cityCode: cityCode,
-            checkInDate: checkInFormatted,
-            checkOutDate: checkOutFormatted,
-            adults: criteria.numberOfGuests.toString(),
-            currency: 'USD',
-            radius: '20',
-            radiusUnit: 'KM',
-            bestRateOnly: 'true',
-            // Explicitly request hotel details and media if possible with 'view=FULL'
-            // Note: 'view=FULL' significantly increases response size and might not be needed for just the list view.
-            // Remove or keep based on whether detailed descriptions/media are crucial *during search*.
-            // view: 'FULL',
-        });
+        // ** Construct parameters carefully, especially with potentially missing cityCode **
+        const params = new URLSearchParams();
+        if (cityCode) {
+            params.append('cityCode', cityCode);
+        } else {
+            // **Crucial:** If no cityCode, Amadeus Hotel Search v2 REQUIRES lat/long OR hotelIds.
+            // Searching by city name alone is NOT directly supported in v2 Shopping API.
+            // We cannot proceed reliably without a cityCode or coordinates.
+             console.error("CLIENT: Cannot perform hotel search without cityCode or coordinates.");
+             throw new Error(`Search cannot be performed for "${criteria.city}" without a valid location code. Please try a different city name or spelling known to Amadeus.`);
+        }
+        params.append('checkInDate', checkInFormatted);
+        params.append('checkOutDate', checkOutFormatted);
+        params.append('adults', criteria.numberOfGuests.toString());
+        params.append('currency', 'USD');
+        params.append('radius', '20'); // Search radius around the city center
+        params.append('radiusUnit', 'KM');
+        params.append('paymentPolicy', 'NONE'); // Filter for hotels without complex payment policies initially
+        params.append('bestRateOnly', 'true'); // Try to get the best rate
+        // params.append('view', 'LIGHT'); // Request less data initially
 
         const searchUrl = `${CLIENT_AMADEUS_CONFIG.baseUrl}/v2/shopping/hotel-offers?${params.toString()}`;
-        console.log(`CLIENT: Fetching Amadeus Hotel Offers: ${searchUrl}`);
+        console.log(`CLIENT: Attempting to fetch Amadeus Hotel Offers: ${searchUrl}`);
 
         const response = await fetch(searchUrl, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${token}`,
             },
+            // mode: 'cors', // Default
         });
 
         console.log(`CLIENT: Amadeus Search Response Status: ${response.status}`);
@@ -216,29 +285,35 @@ export default function HomePage() {
                    }
                  }
              } catch (parseError) { /* Ignore, use status text */ }
+             // Check for CORS/Network error again
+             if (response.status === 0 || !response.status) {
+                 apiErrorMessage = "CLIENT Network/CORS error during Amadeus hotel search. Check browser console and network tab. The API likely blocks direct browser requests.";
+                 setIsCorsError(true); // Set CORS error flag
+             }
             throw new Error(apiErrorMessage);
         }
 
         const data = JSON.parse(responseBodyText);
 
         if (data?.data?.length > 0) {
-            // Filter for offers that have basic hotel info and a price
+            // Filter for offers that have essential info
              const validOffers = data.data.filter((offer: AmadeusHotelOffer) =>
                 offer.hotel &&
-                offer.hotel.hotelId && // Ensure hotel ID exists
-                offer.hotel.name && // Ensure hotel name exists
-                offer.offers?.[0]?.price?.total // Ensure there's an offer with a total price
+                offer.hotel.hotelId &&
+                offer.hotel.name &&
+                offer.offers?.[0]?.price?.total
              );
-             console.log(`CLIENT: Found ${validOffers.length} valid hotel offers.`);
-             // Use the imported transformer function
-             setSearchResults(validOffers.map(transformAmadeusHotelOffer));
-             if (validOffers.length === 0) {
-                 console.log("CLIENT: No valid offers found after filtering.");
-                  setSearchError(`No available hotels found matching your criteria in ${criteria.city} for the selected dates. Try different dates or a broader search.`);
+             console.log(`CLIENT: Found ${data.data.length} offers, ${validOffers.length} seem valid.`);
+
+             if (validOffers.length > 0) {
+                setSearchResults(validOffers.map(transformAmadeusHotelOffer));
+             } else {
+                 console.log("CLIENT: No valid offers found after filtering (missing name, ID, or price).");
+                  setSearchError(`No available hotels found matching your criteria in ${criteria.city} for the selected dates. Try different dates or ensure the location is correct.`);
                  setSearchResults([]); // Explicitly set to empty
              }
         } else {
-            console.log("CLIENT: No hotel data found in response.");
+            console.log("CLIENT: No hotel data array found in response.");
             setSearchError(`No hotels found for ${criteria.city} on these dates. Please check your search criteria.`);
             setSearchResults([]); // Ensure empty results
         }
@@ -248,19 +323,23 @@ export default function HomePage() {
         const errorMessage = error.message || "An unknown error occurred during search.";
         setSearchError(errorMessage);
 
-        // Check for specific client-side or auth errors
+        // Specific error state handling
         if (errorMessage.includes("API Key/Secret missing") || errorMessage.includes("Invalid API Key or Secret")) {
-            setIsConfigError(true); // Use dedicated UI for config issues
-        } else if (errorMessage.includes("Could not find location code")) {
-             // Show specific location error
-             toast({
+            setIsConfigError(true);
+        } else if (errorMessage.includes("Network error or CORS issue") || errorMessage.includes("CORS error")) {
+             setIsCorsError(true); // Set CORS error flag
+             // Optionally provide a more user-friendly CORS message
+             setSearchError("Could not connect to the hotel search service due to network or browser security restrictions (CORS). This setup (client-side API calls) is not recommended for production.");
+        } else if (errorMessage.includes("without a valid location code")) {
+             // Location code specific error
+              toast({
                 title: "Location Error",
                 description: errorMessage,
                 variant: "destructive",
              });
         }
         else {
-            // General API or fetch errors
+            // General API or fetch errors (non-CORS/config)
             toast({
                 title: "Search Error",
                 description: errorMessage,
@@ -321,8 +400,6 @@ export default function HomePage() {
             description: `${hotelToBook.name} has been booked.`,
         });
         setSelectedHotel(null);
-        // Optionally clear dates or reset form state here
-        // setLastSearchCriteria(null);
 
     } catch (error: any) {
         console.error("CLIENT Booking simulation failed:", error);
@@ -345,12 +422,14 @@ export default function HomePage() {
 
   return (
     <div className="container mx-auto py-8 px-4">
-        {/* Security Warning Banner */}
-        <Alert variant="destructive" className="mb-8 bg-yellow-100 border-yellow-400 text-yellow-800">
-            <ShieldAlert className="h-5 w-5 text-yellow-600" />
-            <AlertTitle className="font-semibold">Security Warning</AlertTitle>
+        {/* Security & CORS Warning Banner */}
+        <Alert variant="destructive" className="mb-8 bg-destructive/10 border-destructive/30 text-destructive">
+             <AlertTriangle className="h-5 w-5 !text-destructive" /> {/* Ensure icon color is correct */}
+            <AlertTitle className="font-semibold">Configuration & Security Warning</AlertTitle>
             <AlertDescription>
-                API calls are currently being made directly from your browser. This configuration exposes sensitive API credentials and is **not secure** for production environments. Use server-side API calls for secure applications.
+                Hotel data is currently being fetched directly from your browser. This is **insecure** as it exposes API credentials and often leads to **CORS errors** (browser security preventing requests to external APIs).
+                <br />
+                For a real application, API calls **must** be handled server-side (e.g., using Next.js API Routes or Server Actions) to protect credentials and avoid CORS issues. This client-side approach is for demonstration only.
             </AlertDescription>
         </Alert>
 
@@ -373,8 +452,8 @@ export default function HomePage() {
       {isLoading && (
         <div className="flex flex-col justify-center items-center py-10 text-center">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
-          <p className="text-lg text-foreground">Searching for eco-friendly hotels via Amadeus...</p>
-          <p className="text-sm text-muted-foreground">This may take a moment.</p>
+          <p className="text-lg text-foreground">Searching for eco-friendly hotels via Amadeus (Client-Side)...</p>
+          <p className="text-sm text-muted-foreground">This may take a moment. Watch the browser console for details/errors.</p>
         </div>
       )}
 
@@ -383,14 +462,23 @@ export default function HomePage() {
          <div className="text-center py-10">
           {isConfigError ? (
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
-                 <Info className="h-5 w-5 text-destructive" />
-                <AlertTitle className="font-semibold text-destructive">Search Unavailable</AlertTitle>
+                 <Info className="h-5 w-5 !text-destructive" />
+                <AlertTitle className="font-semibold text-destructive">Search Configuration Error</AlertTitle>
                 <AlertDescription className="text-destructive/90">
-                   {searchError} {/* Display the specific error */}
-                   <p className="mt-2 text-xs"> Please ensure API credentials in `src/services/booking.ts` (CLIENT_AMADEUS_CONFIG) are correct or switch to secure server-side calls.</p>
+                   {searchError}
+                   <p className="mt-2 text-xs">Please ensure API credentials in `src/services/booking.ts` (CLIENT_AMADEUS_CONFIG) are correct.</p>
                 </AlertDescription>
             </Alert>
-          ) : (
+          ) : isCorsError ? (
+             <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
+                 <AlertTriangle className="h-5 w-5 !text-destructive" />
+                <AlertTitle className="font-semibold text-destructive">Network or CORS Error</AlertTitle>
+                <AlertDescription className="text-destructive/90">
+                   {searchError}
+                    <p className="mt-2 text-xs">Direct browser API calls are likely blocked by CORS policy or network issues. Check the browser's console (F12) Network tab for failed requests. Server-side API calls are the standard solution.</p>
+                </AlertDescription>
+            </Alert>
+           ): (
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
