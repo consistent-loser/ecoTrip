@@ -22,10 +22,6 @@ import { Loader2, PartyPopper, SearchX, RefreshCcw, Leaf, PiggyBank, ServerCrash
 import { useToast } from "@/hooks/use-toast";
 import Image from 'next/image';
 
-// --- Client-Side API Functions Removed ---
-// getAmadeusAccessToken_Client, getCityCode_Client, and client-side search logic
-// are removed. API calls are now handled by server actions in booking.ts.
-
 export default function HomePage() {
   const [searchResults, setSearchResults] = useState<Hotel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,10 +33,9 @@ export default function HomePage() {
   const [lastSearchCriteria, setLastSearchCriteria] = useState<HotelSearchCriteria | null>(null);
   const [totalSavings, setTotalSavings] = useState<number>(0);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [isConfigError, setIsConfigError] = useState<boolean>(false); // State for API key config error (server-side)
-  // CORS error state is less relevant now, but can keep for potential server fetch issues
+  const [isConfigError, setIsConfigError] = useState<boolean>(false); 
   const [isApiError, setIsApiError] = useState<boolean>(false);
-  const [bookedHotelName, setBookedHotelName] = useState<string>(''); // To show in success dialog
+  const [bookedHotelName, setBookedHotelName] = useState<string>(''); 
 
   const { toast } = useToast();
 
@@ -63,7 +58,6 @@ export default function HomePage() {
     setLastSearchCriteria(criteria);
     console.log("Initiating SERVER-SIDE Amadeus search via Server Action...");
 
-    // --- Client-Side Validation (Remains) ---
     if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests || criteria.numberOfGuests < 1) {
         setSearchError("Please fill in all search fields accurately.");
         setIsLoading(false);
@@ -74,10 +68,8 @@ export default function HomePage() {
         setIsLoading(false);
         return;
     }
-    // No need to check API keys on the client anymore
 
     try {
-        // Call the server action 'searchHotels' from booking.ts
         const results = await searchHotels(criteria);
 
         if (results.length > 0) {
@@ -85,25 +77,25 @@ export default function HomePage() {
            console.log(`SERVER ACTION: Found ${results.length} hotels.`);
         } else {
            console.log("SERVER ACTION: No hotel data returned.");
-           setSearchError(`No available hotels found matching your criteria in ${criteria.city} for the selected dates. Try different dates or ensure the location is correct.`);
+           // The server action will throw an error for "no hotels found", which will be caught below.
+           // If it returns empty without error, that's an unexpected case.
+           setSearchError(`No available hotels found matching your criteria in ${criteria.city} for the selected dates. This might be an unexpected issue.`);
            setSearchResults([]);
         }
 
     } catch (error: any) {
         console.error("SERVER ACTION Search failed:", error);
         const errorMessage = error.message || "An unknown error occurred during search.";
-        setSearchError(errorMessage);
+        setSearchError(errorMessage); // Set the specific error message from the server
 
-        // Check if the error message indicates a configuration issue from the server
         if (errorMessage.includes("API credentials missing")) {
             setIsConfigError(true);
-            setSearchError("Server configuration error: API credentials missing. Please contact support.");
-        } else if (errorMessage.includes("Amadeus auth failed") || errorMessage.includes("Search failed") || error.message.includes("No hotels found")) {
-            // General API or fetch errors relayed from the server
+            // The main searchError state will hold the specific message from backend.
+        } else if (errorMessage.includes("Amadeus auth failed") || errorMessage.includes("Search failed:") || errorMessage.includes("No hotels found") || errorMessage.includes("Sorry, we couldn't find any available hotels")) {
             setIsApiError(true);
-             toast({
+             toast({ // Keep toast for immediate feedback
                 title: "Search Error",
-                description: errorMessage, // Show the error message from the server
+                description: errorMessage,
                 variant: "destructive",
             });
         } else {
@@ -149,16 +141,14 @@ export default function HomePage() {
     setBookedHotelName(hotelToBook.name);
 
     try {
-        // Call the SERVER-SIDE booking simulation via server action
         const bookedTrip = await simulateBookHotel(
             hotelToBook,
             lastSearchCriteria.checkInDate,
             lastSearchCriteria.checkOutDate,
             lastSearchCriteria.numberOfGuests,
-            paymentDetails // Payment details are passed but only used for simulation logic on server
+            paymentDetails 
         );
 
-        // Add trip to localStorage (Client-side action)
         await addTrip(bookedTrip);
 
         setShowPaymentDialog(false);
@@ -183,15 +173,12 @@ export default function HomePage() {
 
   const calculateTotalAmount = () => {
     if (!selectedHotel) return 0;
-    // Assuming pricePerNight IS the total price for the stay from Amadeus Offers
     return selectedHotel.pricePerNight;
   };
 
 
   return (
     <div className="container mx-auto py-8 px-4">
-        {/* Removed Client-Side Security Warning Banner */}
-
       <section className="text-center mb-12 hero-section py-16 md:py-20 bg-gradient-to-r from-primary/80 via-primary to-accent/70 rounded-lg shadow-xl relative overflow-hidden">
         <div className="absolute inset-0 opacity-20">
             <Image src="https://picsum.photos/seed/travelbg/1200/500" alt="Scenic travel background" layout="fill" objectFit="cover" data-ai-hint="landscape travel" priority />
@@ -207,7 +194,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Loading State */}
       {isLoading && (
         <div className="flex flex-col justify-center items-center py-10 text-center">
           <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -216,10 +202,9 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Error State */}
        {!isLoading && searchPerformed && searchError && (
          <div className="text-center py-10">
-          {isConfigError ? ( // Specific error for missing server credentials
+          {isConfigError ? ( 
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
                  <Info className="h-5 w-5 !text-destructive" />
                 <AlertTitle className="font-semibold text-destructive">Server Configuration Error</AlertTitle>
@@ -228,16 +213,15 @@ export default function HomePage() {
                    <p className="mt-2 text-xs">The server is missing necessary API credentials to connect to the hotel service. Please contact support.</p>
                 </AlertDescription>
             </Alert>
-          ) : isApiError ? ( // General API errors from the server
+          ) : isApiError ? ( 
              <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
                  <AlertTriangle className="h-5 w-5 !text-destructive" />
-                <AlertTitle className="font-semibold text-destructive">Search API Error</AlertTitle>
+                <AlertTitle className="font-semibold text-destructive">Search Problem</AlertTitle>
                 <AlertDescription className="text-destructive/90">
-                   {searchError}
-                    <p className="mt-2 text-xs">There was an issue communicating with the hotel search service. Please check your search criteria or try again later.</p>
+                   {searchError} {/* Display the specific error from the server */}
                 </AlertDescription>
             </Alert>
-           ): ( // Other unexpected errors
+           ): ( 
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
@@ -253,7 +237,6 @@ export default function HomePage() {
       )}
 
 
-      {/* No Results State */}
       {!isLoading && searchPerformed && !searchError && searchResults.length === 0 && (
          <div className="text-center py-10">
           <SearchX className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
@@ -267,7 +250,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Success State - Results Found */}
       {!isLoading && !searchError && searchResults.length > 0 && (
         <section>
           <h2 className="text-3xl font-semibold mb-8 text-center">
@@ -281,7 +263,6 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Initial State - Why Choose Us Section */}
       {!isLoading && !searchPerformed && !searchError && (
          <section className="py-16">
             <div className="text-center mb-12">
@@ -292,7 +273,6 @@ export default function HomePage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-16">
-                {/* Eco Rebooking Card */}
                 <div className="flex flex-col items-center md:items-start">
                     <div className="mb-6 w-full max-w-md">
                         <Image src="https://picsum.photos/seed/rebook/600/400" alt="Piggy bank symbolizing savings" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="savings money" />
@@ -317,7 +297,6 @@ export default function HomePage() {
                     </div>
                 </div>
 
-                {/* Travel Green Card */}
                 <div className="flex flex-col items-center md:items-start">
                     <div className="mb-6 w-full max-w-md">
                         <Image src="https://picsum.photos/seed/ecohotel/600/400" alt="Hotel building with green leaves overlay" width={600} height={400} className="w-full h-auto rounded-lg shadow-lg object-cover" data-ai-hint="eco hotel" />
@@ -340,7 +319,6 @@ export default function HomePage() {
       )}
 
 
-      {/* Payment Dialog */}
       {selectedHotel && (
         <Dialog open={showPaymentDialog} onOpenChange={(isOpen) => {
             setShowPaymentDialog(isOpen);
@@ -364,7 +342,6 @@ export default function HomePage() {
         </Dialog>
       )}
 
-      {/* Booking Success Dialog */}
       <Dialog open={showBookingSuccessDialog} onOpenChange={setShowBookingSuccessDialog}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>

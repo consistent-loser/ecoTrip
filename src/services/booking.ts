@@ -298,6 +298,10 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     // --- Criteria Validation ---
     let cityCode = criteria.cityCode; // Use mutable variable for potential lookup
 
+    if (!criteria.checkInDate || !criteria.checkOutDate) {
+        console.error("SERVER (searchHotels): Missing check-in or check-out date.");
+       throw new Error("Missing required search criteria: Check-in and check-out dates are required.");
+   }
     if (!cityCode) {
        // If cityCode is missing, try to derive it from the city name
         if (!criteria.city) {
@@ -311,7 +315,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
             cityCode = await getCityCode(criteria.city, tokenForLookup); // Assign lookup result
             if (!cityCode) {
                 console.error(`SERVER (searchHotels): Failed lookup for city: ${criteria.city}`);
-                throw new Error(`Could not determine location code for city: "${criteria.city}". Please select a valid location from suggestions.`);
+                throw new Error(`Could not determine location code for city: "${criteria.city}". Please select a valid location from suggestions or check spelling.`);
             }
              console.log(`SERVER (searchHotels): Using derived cityCode ${cityCode} for search.`);
          } catch(lookupError: any){
@@ -320,10 +324,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
              throw new Error(`Failed to prepare search: ${lookupError.message}`);
          }
     }
-    if (!criteria.checkInDate || !criteria.checkOutDate) {
-         console.error("SERVER (searchHotels): Missing check-in or check-out date.");
-        throw new Error("Missing required search criteria: Check-in and check-out dates are required.");
-    }
+
      if (criteria.checkOutDate <= criteria.checkInDate) {
          console.error("SERVER (searchHotels): Invalid date range.");
          throw new Error("Validation Error: Check-out date must be after check-in date.");
@@ -360,7 +361,6 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         params.append('checkOutDate', checkOutFormatted);
         params.append('adults', criteria.numberOfGuests.toString());
         params.append('roomQuantity', '1'); // Assuming 1 room
-        // params.append('ratings', '2,3,4,5'); // Example: Only search for 2-star and above - REMOVED FOR BROADER SEARCH
         params.append('currency', 'USD');
         params.append('lang', 'EN');
         params.append('paymentPolicy', 'NONE'); // Filter out hotels requiring immediate payment details
@@ -392,18 +392,18 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                  if (errorJson.errors && errorJson.errors.length > 0) {
                    const firstError = errorJson.errors[0];
                    errorCode = firstError.code || errorCode;
-                   apiErrorMessage = `Search failed: ${firstError.title || 'Unknown API Error'}. ${firstError.detail || ''} (${errorCode})`;
-                   // Specific error handling based on observed codes
-                   if ([38196, 477, 574, 904].includes(Number(errorCode))) { // 904 also seen for "NO_HOTEL_FOUND"
-                       apiErrorMessage = `No hotels found for ${criteria.city || cityCode} on these dates, or the dates/parameters are invalid. Please check your search. (${errorCode})`;
-                   } else if (firstError.status === 400 || errorCode === 4926) { // 4926: "INVALID FORMAT"
-                        apiErrorMessage = `Search failed: Invalid request format or parameters. Check location, dates, and guest count. (${errorCode})`;
+                   apiErrorMessage = `Search failed: ${firstError.title || 'Unknown API Error'}. ${firstError.detail || ''} (Code: ${errorCode})`;
+                   
+                   if ([38196, 477, 574, 904].includes(Number(errorCode))) { 
+                       apiErrorMessage = `Sorry, we couldn't find any available hotels for "${criteria.city || cityCode}" for the selected dates (${formatDate(criteria.checkInDate, 'MMM d')} - ${formatDate(criteria.checkOutDate, 'MMM d')}). Please try different dates or another location. (Code: ${errorCode})`;
+                   } else if (firstError.status === 400 || errorCode === 4926) { 
+                        apiErrorMessage = `Search failed: Invalid request format or parameters. Check location, dates, and guest count. (Code: ${errorCode})`;
                    } else if (firstError.status === 401) {
-                        apiErrorMessage = `Authentication failed with hotel service. (${errorCode})`;
+                        apiErrorMessage = `Authentication failed with hotel service. (Code: ${errorCode})`;
                    } else if (firstError.status === 403) {
-                        apiErrorMessage = `Permission denied by hotel service. (${errorCode})`;
+                        apiErrorMessage = `Permission denied by hotel service. (Code: ${errorCode})`;
                     } else if (firstError.status >= 500) {
-                         apiErrorMessage = `Hotel service temporary error. Please try again later. (${errorCode})`;
+                         apiErrorMessage = `Hotel service temporary error. Please try again later. (Code: ${errorCode})`;
                     }
                  }
              } catch (parseError) { /* Ignore JSON parse error */ }
@@ -439,30 +439,26 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         console.error("SERVER (searchHotels) Error during Amadeus v2 hotel search process:");
         console.error(`Timestamp: ${new Date().toISOString()} (Duration: ${duration}ms)`);
         if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
-        if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error(`City Code used: NO (not provided or lookup failed)`);
-        console.error("Search Criteria:", criteria); // Log the original criteria
-        console.error("Error Caught:", error); // Log the full error object
-        console.error("Error Message:", error.message);
+        if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error(`City Code used: NO (not provided or lookup failed). Searched city name: "${criteria.city}"`);
+        console.error("Search Criteria (resolved):", { ...criteria, cityCode, checkInDate: formatDate(criteria.checkInDate, 'yyyy-MM-dd'), checkOutDate: formatDate(criteria.checkOutDate, 'yyyy-MM-dd') });
+        console.error("Error Caught:", error.name, error.message);
+        // console.error("Error Stack:", error.stack); // Can be very verbose
         console.error("-----------------------------------------");
 
-        // Determine user-friendly message based on caught error
         let userMessage = "An error occurred during the hotel search.";
          if (error.message.includes("API credentials missing")) {
              userMessage = "Server configuration error: API credentials missing.";
          } else if (error.message.includes("Amadeus auth failed")) {
-             userMessage = `Authentication with the hotel service failed. ${error.message.includes('Invalid Credentials') ? ' (Invalid Credentials)' : ''}`;
-         } else if (error.message.includes("Search failed:") || error.message.includes("No hotels found")) {
-             // Use the specific message from API if available and parsed correctly
+             userMessage = `Authentication with the hotel service failed.${error.message.includes('Invalid API Key or Secret') ? ' Check server API credentials.' : ''}`;
+         } else if (error.message.includes("Search failed:") || error.message.includes("No hotels found") || error.message.includes("Sorry, we couldn't find any available hotels")) {
              userMessage = error.message;
          } else if (error.message.includes("Could not determine location code") || error.message.includes("Failed to prepare search")) {
-             userMessage = error.message; // Pass specific lookup/preparation error
+             userMessage = error.message; 
          } else if (error.message.includes("Validation Error:")) {
-             userMessage = error.message; // Pass validation error
-         } else if (error.message.includes('fetch')) { // Generic fetch error
+             userMessage = error.message; 
+         } else if (error.message.includes('fetch')) { 
              userMessage = "Network error: Could not reach the hotel search service. Please check your connection or try again later.";
          }
-
-        // Propagate a new error with the user-friendly message
         throw new Error(userMessage);
     }
 }
