@@ -1,6 +1,7 @@
 'use server'; // Mark this module's exports as Server Actions
 
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
+import { format as formatDate } from 'date-fns'; // Import date-fns for formatting
 
 // --- Amadeus API Configuration (Server-Side) ---
 // Use environment variables on the server for security.
@@ -17,7 +18,7 @@ const AMADEUS_API_BASE_URL = process.env.AMADEUS_API_BASE_URL || 'https://test.a
  * @param offer The hotel offer object from Amadeus API.
  * @returns A Hotel object.
  */
-function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
+export async function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Promise<Hotel> {
     const hotelData = offer.hotel;
     const offerDetails = offer.offers?.[0]; // Get the first offer
     const offerPrice = offerDetails?.price;
@@ -182,13 +183,13 @@ async function getCityCode(cityName: string, token: string): Promise<string | nu
 
 
 /**
- * Searches for hotels using the Amadeus API. SERVER ACTION.
+ * Searches for hotels using the Amadeus API V1. SERVER ACTION.
  * @param criteria The search criteria.
  * @returns A promise resolving to an array of Hotel objects.
  * @throws Error if the search fails or API is misconfigured.
  */
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
-    console.log("SERVER ACTION: searchHotels called with criteria:", criteria);
+    console.log("SERVER ACTION: searchHotels (v1) called with criteria:", criteria);
 
     // Validate required criteria for Amadeus
     if (!criteria.city || !criteria.checkInDate || !criteria.checkOutDate || !criteria.numberOfGuests) {
@@ -215,39 +216,37 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         console.log(`SERVER: Getting City Code for ${criteria.city}...`);
         cityCode = await getCityCode(criteria.city, token);
          if (!cityCode) {
-             // Log warning but proceed, Amadeus v2 needs cityCode or lat/lon
              console.warn(`SERVER: No city code found for ${criteria.city}. Search might fail or be inaccurate.`);
               throw new Error(`Search cannot be performed for "${criteria.city}" without a valid location code. Please try a different city name or spelling known to Amadeus.`);
          } else {
             console.log(`SERVER: Using City Code ${cityCode}.`);
          }
 
-        // 3. Perform Hotel Search
-        const checkInFormatted = criteria.checkInDate.toISOString().split('T')[0];
-        const checkOutFormatted = criteria.checkOutDate.toISOString().split('T')[0];
+        // 3. Perform Hotel Search using Amadeus V1
+        // Format dates correctly (YYYY-MM-DD)
+        const checkInFormatted = formatDate(criteria.checkInDate, 'yyyy-MM-dd');
+        const checkOutFormatted = formatDate(criteria.checkOutDate, 'yyyy-MM-dd');
 
         const params = new URLSearchParams();
-         // ** Amadeus v2 REQUIRES cityCode **
          if (cityCode) {
              params.append('cityCode', cityCode);
          } else {
-              // Should have thrown error above if cityCode is null
-               console.error("SERVER: Critical error - cityCode is null, cannot proceed with Amadeus v2 search.");
+               console.error("SERVER: Critical error - cityCode is null, cannot proceed with Amadeus v1 search.");
                throw new Error("Location code could not be determined for the search.");
          }
         params.append('checkInDate', checkInFormatted);
         params.append('checkOutDate', checkOutFormatted);
         params.append('adults', criteria.numberOfGuests.toString());
-        params.append('currency', 'USD');
-        params.append('radius', '20'); // Search radius
-        params.append('radiusUnit', 'KM');
-        params.append('paymentPolicy', 'NONE');
-        params.append('includeClosed', 'false');
-        params.append('bestRateOnly', 'true');
-        params.append('view', 'LIGHT'); // Start with LIGHT view
+        // V1 specific or commonly used parameters:
+        // params.append('radius', '20'); // Search radius
+        // params.append('radiusUnit', 'KM');
+        // params.append('currency', 'USD'); // Usually defaults or can be set
+        // params.append('lang', 'EN');
+        // params.append('view', 'LIGHT'); // LIGHT view might be faster
 
-        const searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`;
-        console.log(`SERVER: Attempting to fetch Amadeus Hotel Offers: ${searchUrl}`);
+        // *** Change endpoint to v1 ***
+        const searchUrl = `${AMADEUS_API_BASE_URL}/v1/shopping/hotel-offers?${params.toString()}`;
+        console.log(`SERVER: Attempting to fetch Amadeus V1 Hotel Offers: ${searchUrl}`);
 
         const response = await fetch(searchUrl, {
             method: 'GET',
@@ -257,12 +256,12 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
             cache: 'no-store', // Don't cache search results
         });
 
-        console.log(`SERVER: Amadeus Search Response Status: ${response.status}`);
+        console.log(`SERVER: Amadeus V1 Search Response Status: ${response.status}`);
         const responseBodyText = await response.text(); // Read body once
 
         if (!response.ok) {
-            console.error("SERVER Amadeus Search Error Body:", responseBodyText);
-            let apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}`;
+            console.error("SERVER Amadeus V1 Search Error Body:", responseBodyText);
+            let apiErrorMessage = `Amadeus v1 hotel search failed: ${response.status} ${response.statusText}`;
             let errorCode: string | number = response.status; // Default to HTTP status
              try {
                  const errorJson = JSON.parse(responseBodyText);
@@ -291,30 +290,31 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
                 offer.hotel.name &&
                 offer.offers?.[0]?.price?.total
              );
-             console.log(`SERVER: Found ${data.data.length} offers, ${validOffers.length} seem valid.`);
+             console.log(`SERVER: Found ${data.data.length} offers (v1), ${validOffers.length} seem valid.`);
 
              if (validOffers.length > 0) {
                  // Transform valid offers using the helper function
-                 return validOffers.map(transformAmadeusHotelOffer);
+                 // Use Promise.all since transformAmadeusHotelOffer is async now
+                 return Promise.all(validOffers.map(transformAmadeusHotelOffer));
              } else {
                  console.log("SERVER: No valid offers found after filtering (missing name, ID, or price).");
                   return []; // Return empty array, UI will show "No results"
              }
         } else {
-            console.log("SERVER: No hotel data array found in response.");
+            console.log("SERVER: No hotel data array found in v1 response.");
             return []; // Return empty array
         }
 
     } catch (error: any) {
         console.error("-----------------------------------------");
-        console.error("SERVER Error during Amadeus hotel search process:");
+        console.error("SERVER Error during Amadeus v1 hotel search process:");
         console.error(`Timestamp: ${new Date().toISOString()}`);
         if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
         if (cityCode) console.error(`City Code used: ${cityCode}`); else console.error(`City Code used: NO (failed lookup or not reached)`);
         console.error("Search Criteria:", criteria);
         console.error("Error Message:", error.message);
         // Removed detailed stack trace logging for brevity in this context, can be re-added if needed for deep debugging
-        // console.error("Stack Trace:", error.stack); 
+        // console.error("Stack Trace:", error.stack);
         console.error("-----------------------------------------");
 
         // Rethrow the error so the client-side UI can catch it and display a message
@@ -361,7 +361,7 @@ export async function simulateBookHotel(
   // This would involve:
   // 1. Re-fetching the specific offer price using the offer ID (to ensure price hasn't changed).
   //    - Requires passing the offer ID from the client during the 'Book Now' click.
-  //    - Amadeus API: GET /v2/shopping/hotel-offers/{offerId} (or similar pricing endpoint)
+  //    - Amadeus API: GET /v1/shopping/hotel-offers/{offerId} (or similar pricing endpoint) - Note: V1 might use different endpoint
   // 2. Creating the booking with traveler details and payment info.
   //    - Amadeus API: POST /v1/booking/hotel-bookings
   //    - This requires handling sensitive traveler data securely.
