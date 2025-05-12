@@ -3,14 +3,9 @@
 import type { Hotel, HotelSearchCriteria, Trip, PaymentDetails, AmadeusHotelOffer, AmadeusAccessToken } from '@/types';
 
 // --- Amadeus API Configuration ---
-// IMPORTANT: In a real application, NEVER hardcode API keys. Use environment variables.
-// Example .env.local:
-// NEXT_PUBLIC_AMADEUS_API_KEY=YourApiKey
-// NEXT_PUBLIC_AMADEUS_API_SECRET=YourApiSecret
-// Note: Exposing secrets (like API Secret) with NEXT_PUBLIC_ is insecure for production.
-// Ideally, API calls requiring secrets should happen server-side (API route or Server Action).
-const AMADEUS_API_KEY = process.env.NEXT_PUBLIC_AMADEUS_API_KEY || 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret';
-const AMADEUS_API_SECRET = process.env.NEXT_PUBLIC_AMADEUS_API_SECRET || 'U1MGYukFmZhrjq40';
+// Environment variables are loaded automatically by Next.js from .env.local
+const AMADEUS_API_KEY = process.env.NEXT_PUBLIC_AMADEUS_API_KEY;
+const AMADEUS_API_SECRET = process.env.NEXT_PUBLIC_AMADEUS_API_SECRET;
 const AMADEUS_API_BASE_URL = 'https://test.api.amadeus.com'; // Use https://api.amadeus.com for production
 
 // --- Amadeus Authentication ---
@@ -20,6 +15,7 @@ let tokenExpiryTime: number | null = null;
 /**
  * Fetches or retrieves a cached Amadeus API access token.
  * @returns A promise that resolves to the access token string.
+ * @throws Error if authentication fails or API keys are missing/invalid.
  */
 async function getAmadeusAccessToken(): Promise<string> {
   const now = Date.now();
@@ -29,17 +25,15 @@ async function getAmadeusAccessToken(): Promise<string> {
     return accessToken.access_token;
   }
 
-  // Check if keys are available before attempting to fetch token
+  // Explicitly check if keys are missing *before* making the API call
   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
-      const message = "Amadeus API Key/Secret not configured. Cannot authenticate.";
+      const message = "Amadeus API Key/Secret not configured. Cannot authenticate. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.";
       console.error(message);
-      throw new Error(message);
+      throw new Error(message); // Throw error early
   }
-  // Check specifically for the placeholder values if environment variables weren't set
-  if (AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-      console.warn("Using placeholder Amadeus API Key/Secret. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables for proper functionality.");
-      // Allow fetching token even with placeholders for testing basic connectivity, but auth will likely fail.
-  }
+  // Optional: Check for known placeholder values if you want to be extra cautious
+  // (Though the check above should generally cover missing real keys)
+  // if (AMADEUS_API_KEY === 'YOUR_PLACEHOLDER_KEY' || AMADEUS_API_SECRET === 'YOUR_PLACEHOLDER_SECRET') { ... }
 
 
   console.log("Fetching new Amadeus token...");
@@ -49,6 +43,7 @@ async function getAmadeusAccessToken(): Promise<string> {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
+      // Use the keys fetched from environment variables
       body: `grant_type=client_credentials&client_id=${AMADEUS_API_KEY}&client_secret=${AMADEUS_API_SECRET}`,
     });
 
@@ -71,7 +66,7 @@ async function getAmadeusAccessToken(): Promise<string> {
         console.warn("Could not parse Amadeus auth error response JSON.");
       }
 
-      throw new Error(errorMessage);
+      throw new Error(errorMessage); // Throw the detailed error message
     }
 
     const tokenData: AmadeusAccessToken = await response.json();
@@ -84,7 +79,7 @@ async function getAmadeusAccessToken(): Promise<string> {
     console.error("Error fetching Amadeus access token:", error);
     accessToken = null; // Invalidate token on error
     tokenExpiryTime = null;
-    // Re-throw the potentially more specific error message caught above
+    // Re-throw the caught error (could be network error or the specific auth error)
     throw error;
   }
 }
@@ -194,66 +189,63 @@ function transformAmadeusHotelOffer(offer: AmadeusHotelOffer): Hotel {
  * Searches for hotels using the Amadeus API.
  * @param criteria The search criteria.
  * @returns A promise that resolves to an array of Hotel objects.
+ * @throws Error if search fails due to configuration, authentication, or API errors.
  */
 export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel[]> {
   console.log("Searching Amadeus hotels with criteria:", criteria);
 
-   // Check if API keys are actually missing or empty or placeholders before proceeding
-   if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET || AMADEUS_API_KEY === 'jPwfhVR27QjkTnqgNObpCJo9EbpEGTe9secret' || AMADEUS_API_SECRET === 'U1MGYukFmZhrjq40') {
-       const errorMessage = "Amadeus API Key/Secret not configured or using placeholder values. Please set NEXT_PUBLIC_AMADEUS_API_KEY and NEXT_PUBLIC_AMADEUS_API_SECRET environment variables.";
-       console.error(errorMessage);
-       // Throw an error so the UI can catch it and display an appropriate message
-       throw new Error(errorMessage);
-   }
-
+   // First, check if the environment variables are set. getAmadeusAccessToken will handle this now.
+   // No need for the redundant check here if getAmadeusAccessToken throws properly.
 
   const { city, checkInDate, checkOutDate, numberOfGuests } = criteria;
 
+  // Validate required criteria *before* attempting API calls
   if (!city) {
     console.warn("No city provided for Amadeus search.");
-    // Throw error instead of returning empty array
     throw new Error("Please provide a destination city for the search.");
   }
   if (!checkInDate || !checkOutDate) {
       console.warn("Check-in and Check-out dates are required for Amadeus search.");
-      // Throw error instead of returning empty array
       throw new Error("Please provide both check-in and check-out dates for the search.");
   }
+   if (checkOutDate <= checkInDate) {
+      console.warn("Check-out date must be after check-in date.");
+      throw new Error("Check-out date must be after check-in date.");
+  }
+   if (numberOfGuests < 1) {
+      console.warn("Number of guests must be at least 1.");
+      throw new Error("Please specify at least one guest.");
+  }
+
 
   try {
-    // Get token will throw if auth fails
+    // Get token - This will throw if auth fails (e.g., bad keys, network issues)
     const token = await getAmadeusAccessToken();
-    const cityCode = await getCityCode(city, token);
 
+    // Get City Code
+    const cityCode = await getCityCode(city, token);
     if (!cityCode) {
       console.warn(`Could not find IATA city code for ${city}. Cannot search Amadeus.`);
-      // Optionally inform the user via toast or error state
-      throw new Error(`Could not find location code for "${city}". Please try a different city name.`);
-      // return []; // Or return empty
+      throw new Error(`Could not find location code for "${city}". Please try a different city name or spelling.`);
     }
 
+    // Prepare Search Parameters
     const params = new URLSearchParams({
       cityCode: cityCode,
       checkInDate: checkInDate.toISOString().split('T')[0],
       checkOutDate: checkOutDate.toISOString().split('T')[0],
       adults: numberOfGuests.toString(),
-      // Optional parameters:
-      // roomQuantity: '1',
-      // priceRange: '100-300',
       currency: 'USD',
-      // paymentPolicy: 'NONE', // Check API docs for options
-      // boardType: 'ROOM_ONLY', // Check API docs for options
-      // ratings: '4,5', // Example: 4 and 5 stars
-      // amenities: 'WIFI,PARKING', // Example: Request specific amenities
       radius: '20', // Search radius in KM
       radiusUnit: 'KM',
-      // hotelSource: 'ALL', // Consider 'CACHE' vs 'REAL_TIME' based on needs
-      view: 'LIGHT', // Use 'FULL' for more details, 'LIGHT' for less
-      bestRateOnly: 'true',
+      view: 'LIGHT', // Use 'FULL' for more details if needed (might increase cost/latency)
+      bestRateOnly: 'true', // Typically recommended
+      // Consider adding sort: 'PRICE' or 'DISTANCE' if needed
     });
 
     console.log(`Amadeus Search URL: ${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`);
 
+    // Perform Hotel Search
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers?${params.toString()}`, {
       method: 'GET',
       headers: {
@@ -269,12 +261,13 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
        try {
          const errorJson = JSON.parse(errorBody);
          if (errorJson.errors && errorJson.errors.length > 0) {
-           // Log the first detailed error message
            const firstError = errorJson.errors[0];
            console.error(`Amadeus API Error (${firstError.status}): ${firstError.title} - ${firstError.detail || firstError.code}`);
-           // Use a more user-friendly message if possible
+           // Customize message based on common error codes if desired
            if (firstError.code === 38196) { // Example: Invalid date format or range
                 apiErrorMessage = `Search failed: ${firstError.title}. Please check your dates.`;
+           } else if (firstError.code === 38191) { // Example: Mandatory parameter missing
+                apiErrorMessage = `Search failed: Missing required information (${firstError.title}).`;
            } else {
                 apiErrorMessage = `Search failed: ${firstError.title} (Code: ${firstError.code})`;
            }
@@ -282,9 +275,10 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
        } catch (parseError) {
           console.warn("Could not parse Amadeus search error response JSON.");
        }
-      throw new Error(apiErrorMessage);
+      throw new Error(apiErrorMessage); // Throw the specific API error
     }
 
+    // Process Successful Response
     const data = await response.json();
 
     if (data && data.data && Array.isArray(data.data)) {
@@ -294,18 +288,23 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         if (validOffers.length < data.data.length) {
             console.warn(`Filtered out ${data.data.length - validOffers.length} offers due to missing hotel or price information.`);
         }
+        if (validOffers.length === 0) {
+             console.log("Amadeus search returned results, but none had valid hotel and price info after filtering.");
+             // No need to throw, just return empty. The UI will handle 'No Results'.
+        }
        return validOffers.map(transformAmadeusHotelOffer);
     } else {
-      console.warn("No results from Amadeus API or unexpected format:", data);
-      return [];
+      console.warn("No results array found in Amadeus API response or unexpected format:", data);
+      return []; // Return empty array for no results or bad format
     }
 
   } catch (error) {
     console.error("Error during hotel search process:", error);
-    // Propagate the error message to the UI
+    // Propagate the error so the UI can display it
     if (error instanceof Error) {
-        throw error; // Re-throw the caught error (could be auth error, config error, or other)
+        throw error; // Re-throw the caught error (could be auth, config, validation, or API error)
     } else {
+        // Should not happen often, but catch non-Error throws
         throw new Error("An unknown error occurred during hotel search.");
     }
   }

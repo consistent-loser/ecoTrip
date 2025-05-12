@@ -63,19 +63,22 @@ export default function HomePage() {
       const errorMessage = error.message || "An unknown error occurred during search.";
       setSearchError(errorMessage);
 
-      // Check if it's the specific configuration error
-      if (errorMessage.includes("Amadeus API Key/Secret not configured")) {
+      // Check if it's the specific configuration error message from booking service
+      if (errorMessage.includes("Amadeus API Key/Secret not configured") || errorMessage.includes("Invalid API Key or Secret")) {
           setIsConfigError(true);
+          // No need for a toast here, the dedicated UI element will show
       } else {
+         // Show toast for other types of errors (e.g., network, invalid city, date issues)
          toast({
             title: "Search Error",
             description: errorMessage,
             variant: "destructive",
          });
       }
-      setSearchResults([]);
+      setSearchResults([]); // Ensure results are empty on error
+    } finally {
+       setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleBookNow = (hotel: Hotel) => {
@@ -138,8 +141,9 @@ export default function HomePage() {
       });
       // Keep payment dialog open for retry? Or close? Depends on UX choice.
       // setShowPaymentDialog(false);
+    } finally {
+        setIsBooking(false);
     }
-    setIsBooking(false);
   };
 
   // Recalculate total amount based on Amadeus price (which might be total)
@@ -186,19 +190,29 @@ export default function HomePage() {
        {!isLoading && searchPerformed && searchError && (
          <div className="text-center py-10">
           {isConfigError ? (
-             <>
-                <Info className="h-16 w-16 mx-auto text-destructive mb-4" />
-                <h3 className="text-2xl font-semibold mb-2 text-destructive">API Configuration Error</h3>
-                <p className="text-muted-foreground max-w-md mx-auto">The hotel search feature is not properly configured. Please contact the site administrator or check the developer console for details.</p>
-             </>
+             // Specific UI for Configuration Error
+             <Alert variant="destructive" className="max-w-lg mx-auto bg-destructive/10 border-destructive/30">
+                 <Info className="h-5 w-5 text-destructive" />
+                <AlertTitle className="font-semibold text-destructive">API Configuration Error</AlertTitle>
+                <AlertDescription className="text-destructive/90">
+                    The hotel search feature requires API credentials that are missing or invalid. Please contact the site administrator.
+                    {/* Optional: Display the technical error message for admins/devs */}
+                     <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer hover:underline">Details</summary>
+                        <p className="mt-1 text-left bg-destructive/10 p-2 rounded border border-destructive/20">{searchError}</p>
+                    </details>
+                </AlertDescription>
+            </Alert>
+
           ) : (
+             // Generic UI for other Search Errors
              <>
                 <ServerCrash className="h-16 w-16 mx-auto text-destructive mb-4" />
                 <h3 className="text-2xl font-semibold mb-2 text-destructive">Search Failed</h3>
                 <p className="text-muted-foreground max-w-md mx-auto">{searchError}</p>
                 {lastSearchCriteria && (
-                    <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-4">
-                        Retry Search
+                    <Button onClick={() => handleSearch(lastSearchCriteria)} className="mt-6">
+                        <RefreshCcw className="mr-2 h-4 w-4"/> Retry Search
                     </Button>
                 )}
              </>
