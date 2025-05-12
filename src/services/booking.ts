@@ -29,7 +29,14 @@ async function getAmadeusAccessToken(): Promise<string> {
     return accessToken.access_token;
   }
 
-  // Removed the check for missing keys from environment variables as they are now hardcoded
+  // Check if API keys are missing - crucial first step before attempting auth
+  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+       const message = "CRITICAL (Server): Amadeus API Key/Secret are missing. Cannot proceed with auth. Ensure keys are correctly hardcoded or use environment variables.";
+       console.error(message);
+       // Throw a specific configuration error
+       throw new Error("API credentials missing. Authentication cannot be performed.");
+   }
+
   console.log("Fetching new Amadeus token (Server)...");
   try {
     const response = await fetch(`${AMADEUS_API_BASE_URL}/v1/security/oauth2/token`, {
@@ -260,7 +267,14 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
    // --- End Server-Side Validation ---
 
 
-  // Removed check for missing API keys from environment variables
+  // Ensure API keys are present (redundant check with auth but good practice)
+  if (!AMADEUS_API_KEY || !AMADEUS_API_SECRET) {
+       const message = "CRITICAL (Server): Amadeus API Key/Secret are missing. Cannot proceed with search. Ensure keys are correctly hardcoded or use environment variables.";
+       console.error(message);
+       // Throw a specific configuration error visible to the user interface
+       throw new Error("API credentials missing. Search cannot be performed.");
+   }
+
 
   let token: string | null = null;
   let cityCode: string | null = null;
@@ -268,6 +282,8 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
   let searchUrl = `${AMADEUS_API_BASE_URL}/v2/shopping/hotel-offers`;
   let params: URLSearchParams | null = null; // Declare params here to access in catch
   let fullSearchUrl = ''; // Declare here to access in catch
+  let checkInFormatted = '';
+  let checkOutFormatted = '';
 
 
   try {
@@ -284,8 +300,10 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     console.log(`Using city code: ${cityCode} for ${city} (Server).`);
 
     // Prepare Search Parameters
-    const checkInFormatted = checkIn.toISOString().split('T')[0];
-    const checkOutFormatted = checkOut.toISOString().split('T')[0];
+    // Format dates correctly (YYYY-MM-DD)
+    checkInFormatted = checkIn.toISOString().split('T')[0];
+    checkOutFormatted = checkOut.toISOString().split('T')[0];
+    console.log(`Formatted Check-in: ${checkInFormatted}, Formatted Check-out: ${checkOutFormatted} (Server)`); // Log formatted dates
 
     params = new URLSearchParams({
       cityCode: cityCode,
@@ -295,14 +313,16 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
       currency: 'USD',
       radius: '20', // Search radius in KM
       radiusUnit: 'KM',
-      view: 'LIGHT', // Use 'FULL' for more details if needed (might increase cost/latency)
+      // Removed view=LIGHT, it sometimes causes issues. Let API default or use FULL if needed.
+      // view: 'LIGHT',
       bestRateOnly: 'true', // Typically recommended
       // Consider adding sort: 'PRICE' or 'DISTANCE' if needed
+      // sort: 'PRICE' // Example: Sort by price ascending
     });
 
     fullSearchUrl = `${searchUrl}?${params.toString()}`;
     console.log(`Attempting Amadeus Search (Server): GET ${fullSearchUrl}`);
-    console.log(`  Parameters: cityCode=${cityCode}, checkIn=${checkInFormatted}, checkOut=${checkOutFormatted}, adults=${numberOfGuests}`);
+    console.log(`  Parameters: cityCode=${cityCode}, checkInDate=${checkInFormatted}, checkOutDate=${checkOutFormatted}, adults=${numberOfGuests}`);
 
 
     // Perform Hotel Search
@@ -316,40 +336,58 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
     console.log(`Amadeus Search Response Status: ${response.status} ${response.statusText} (Server)`);
 
+    // Read the response body text immediately, regardless of status, for logging
+    const responseBodyText = await response.text();
+
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`Amadeus Hotel Search Error Response Body (Server, Status ${response.status}):`, errorBody);
+      // Log the raw error body first
+      console.error(`Amadeus Hotel Search Error Response Body (Server, Status ${response.status}):`, responseBodyText);
+
        // Try to parse the error for more specific feedback
        let apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}`;
+       let errorCode: string | number = 'N/A'; // Default error code
        try {
-         const errorJson = JSON.parse(errorBody);
+         const errorJson = JSON.parse(responseBodyText);
          if (errorJson.errors && errorJson.errors.length > 0) {
            const firstError = errorJson.errors[0];
-           const errorCode = firstError.code || 'N/A';
+           errorCode = firstError.code || errorCode; // Capture the code
            const errorTitle = firstError.title || 'Unknown Error';
            const errorDetail = firstError.detail || 'No details provided.';
-           console.error(`Parsed Amadeus API Error (Server, Status ${firstError.status}): Code=${errorCode}, Title=${errorTitle}, Detail=${errorDetail}`);
+           console.error(`Parsed Amadeus API Error (Server, Status ${firstError.status || response.status}): Code=${errorCode}, Title=${errorTitle}, Detail=${errorDetail}`);
 
-           // Customize message based on common error codes if desired
+           // Customize message based on common error codes
            if (errorCode === 38196 || errorCode === '38196') { // Invalid date format or range
-                apiErrorMessage = `Search failed: ${errorTitle}. Please check your dates. (${errorCode})`;
+                // Check if detail mentions date specifically
+                if (errorDetail.toLowerCase().includes('date')) {
+                    apiErrorMessage = `Search failed: Invalid date format or range. Please check your dates. (${errorCode})`;
+                } else {
+                    apiErrorMessage = `Search failed: ${errorTitle}. Check parameters like dates or city code. (${errorCode})`;
+                }
            } else if (errorCode === 38191 || errorCode === '38191') { // Mandatory parameter missing
                 apiErrorMessage = `Search failed: Missing required information (${errorTitle}). (${errorCode})`;
-           } else if (response.status === 404 || errorTitle.toLowerCase().includes('not found') || errorCode === 477 || errorCode === '477') {
-                apiErrorMessage = `Search failed: ${errorTitle}. Please check your dates or destination. (${errorCode})`;
-           } else {
+           } else if ((response.status === 404 || errorTitle.toLowerCase().includes('not found')) && (errorCode === 477 || errorCode === '477')) {
+                // Specific code for 'No availability' or 'Resource not found' often indicates no hotels match criteria
+                apiErrorMessage = `No hotel offers found matching your criteria for ${city} on these dates. Please try different dates or destination. (Code: ${errorCode})`;
+           } else if (response.status === 400) { // Generic Bad Request
+                 apiErrorMessage = `Search failed: Bad Request (${errorTitle}). Please check search parameters like dates and city name. (${errorCode})`;
+           }
+           else {
                 apiErrorMessage = `Search failed: ${errorTitle} (${errorCode})`;
            }
          }
        } catch (parseError) {
           console.warn("Could not parse Amadeus search error response JSON (Server). The raw error body was logged above.");
+          // Use the raw text if it's short enough and potentially informative
+          if (responseBodyText.length < 200) {
+              apiErrorMessage = `Amadeus hotel search failed: ${response.status} ${response.statusText}. Response: ${responseBodyText}`;
+          }
        }
        console.error(`AMADEUS_SEARCH_FAILED (Server): ${apiErrorMessage}`);
       throw new Error(apiErrorMessage); // Throw the specific API error
     }
 
-    // Process Successful Response
-    const data = await response.json();
+    // Process Successful Response (using the already read text body)
+    const data = JSON.parse(responseBodyText);
     // console.log("Amadeus Search Raw Success Response Data:", JSON.stringify(data, null, 2)); // Optional: Log raw success data for debugging structure
 
     if (data && data.data && Array.isArray(data.data)) {
@@ -359,7 +397,7 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
         if (validOffers.length < data.data.length) {
             console.warn(`Filtered out ${data.data.length - validOffers.length} offers due to missing hotel or price information (Server).`);
         }
-        if (validOffers.length === 0) {
+        if (validOffers.length === 0 && data.data.length > 0) {
              console.log("Amadeus search returned results, but none had valid hotel and price info after filtering (Server).");
              // No need to throw, just return empty. The UI will handle 'No Results'.
         }
@@ -379,6 +417,8 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
     if (token) console.error("Token used: YES (obtained successfully)"); else console.error("Token used: NO (failed to obtain or not reached)");
     if (cityCode) console.error(`City Code Resolved: ${cityCode}`); else console.error("City Code Resolved: NO");
     if (params) console.error(`Search Params Sent: ${params.toString()}`); else console.error("Search Params Sent: Not generated");
+    if (checkInFormatted) console.error(`Formatted Check-in Sent: ${checkInFormatted}`);
+    if (checkOutFormatted) console.error(`Formatted Check-out Sent: ${checkOutFormatted}`);
     if (response) {
       console.error(`Fetch Status Code: ${response.status}`);
       console.error(`Fetch Status Text: ${response.statusText}`);
@@ -393,26 +433,19 @@ export async function searchHotels(criteria: HotelSearchCriteria): Promise<Hotel
 
     // Craft a more user-friendly message to send back to the client
     let userMessage = "An unexpected error occurred during the hotel search. Please try again later.";
-    if (error.message?.includes("Failed to fetch")) {
-        userMessage = "Could not connect to the hotel search service. Please check your internet connection and try again.";
+
+    // Prioritize specific error messages thrown earlier
+    if (error.message?.includes("API credentials missing")) {
+        userMessage = "Hotel search is temporarily unavailable due to a configuration issue. Please try again later.";
     } else if (error.message?.includes("Invalid API Key or Secret")) {
-        // Don't expose key details to client, provide generic config error
         userMessage = "There's an issue with the connection to the hotel provider. Please contact support if the problem persists.";
     } else if (error.message?.includes("Could not find location code")) {
         userMessage = error.message; // Pass the specific city error through
-    } else if (error.message?.includes("check your dates")) {
-         userMessage = error.message; // Pass the specific date error through
-    } else if (error.message?.includes("check your dates or destination")) { // Catch the refined message
-         userMessage = error.message;
-    } else if (error.message?.includes("Missing required information")) {
-         userMessage = error.message; // Pass specific missing info error through
-    } else if (error.message?.includes("API credentials missing")) {
-        // Generic message for config issues detected early
-         userMessage = "Hotel search is temporarily unavailable due to a configuration issue. Please try again later.";
-    }
-    // Use the specific API error message if it doesn't match known patterns
-    else if (error.message?.startsWith("Search failed:")) {
+    } else if (error.message?.startsWith("Amadeus hotel search failed:") || error.message?.startsWith("Search failed:") || error.message?.includes("No hotel offers found")) {
+        // Use the refined API error message generated in the catch block
         userMessage = error.message;
+    } else if (error.message?.includes("Failed to fetch")) {
+        userMessage = "Could not connect to the hotel search service. Please check your internet connection and try again.";
     }
 
 
@@ -567,3 +600,4 @@ export async function updateTrip(updatedTrip: Trip): Promise<void> {
     }
 
 }
+
